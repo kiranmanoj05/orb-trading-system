@@ -28,9 +28,7 @@ America/New_York. Future signals use a close above the frozen range high before
 
 ## Documentation
 
-- docs/project-report.md: motivation, design journey, evidence and limitations.
-- docs/specification.md: intended behaviour and acceptance criteria.
-- docs/0001-language-choice.md: Python choice and future C++ criteria.
+(pending)
 
 ## Limits
 
