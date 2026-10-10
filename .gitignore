@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+.env
+.env.*
+!.env.example
+data/
+results/
+.DS_Store
+# Personal study material must remain outside version control
+personal-notes/
+private-notes/
+ORB_Personal_Learning_Notes.md

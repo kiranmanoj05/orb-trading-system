@@ -1,12 +1,12 @@
 # Opening Range Breakout Trading System Project Report
 
-Living project documentation • Kiran Manoj • Started 10 October 2026
+Technical project report • Kiran Manoj • Started 10 October 2026
 
 ## Project status
 
 Current stage: first offline implementation. Validated market bars and opening-range calculation are implemented. Historical performance, breakout detection, paper execution and live execution remain unverified. Intended future behaviour is distinguished from completed functionality.
 
-The companion ORB Trading System Specification defines detailed rules and acceptance criteria. This document explains the motivation, design journey, evidence and limitations. Changes to strategy rules must update both documents. Version control should preserve the history of meaningful changes.
+The companion ORB Trading System Specification defines detailed rules and acceptance criteria. This report documents objectives, methodology, implementation, verification and limitations. Changes to strategy rules must update both documents. Version control should preserve the history of meaningful changes.
 
 ## Motivation
 
@@ -14,7 +14,6 @@ This project explores how to turn a trading idea into a reliable software system
 
 The aim is to build practical experience with event-driven Python, financial time-series data, external APIs, relational persistence and testing. A second aim is to evaluate a clear strategy without confusing a successful implementation with a profitable investment method.
 
-For internship interviews, the strongest outcome is a demonstrable system whose decisions I understand: why a trade candidate existed, why risk accepted or rejected it, what the broker actually did, and what happened when part of the system failed. These motivations should be refined in Kiran's own words as development progresses.
 
 ## Why Opening Range Breakout
 
@@ -59,7 +58,7 @@ Skip an incomplete opening range. Honour exchange holidays and early closes. Mis
 
 | Technology | Intended responsibility | Rationale and trade-off |
 |---|---|---|
-| Python | Strategy, replay, risk and orchestration | Fits the existing data-analysis workflow; requires disciplined types and tests |
+| Python | Strategy, replay, risk and orchestration | Supports time-series analysis and API integration; requires explicit validation |
 | Dataclasses and enums | Domain contracts and lifecycle states | Lightweight and readable; validation must still be explicit |
 | Decimal | Domain money and prices | Makes monetary rounding deliberate; slower than array arithmetic |
 | NumPy and pandas | Research and reporting | Convenient time-series analysis; avoid placing a second strategy implementation in notebooks |
@@ -116,7 +115,7 @@ Paper validation examines event handling, broker state, reconciliation and contr
 
 | Claim | Evidence needed | Current state |
 |---|---|---|
-| Range calculation follows the contract | Fixture and boundary tests | Planned |
+| Range calculation follows the contract | 19 passing local tests | Implemented |
 | Backtest avoids same-bar entry leakage | Hand-calculated replay | Planned |
 | Shared strategy logic works in both modes | Replay of identical events plus integration evidence | Planned |
 | Duplicate submission is handled | Timeout and duplicate-event scenarios | Planned |
@@ -133,7 +132,7 @@ Paper validation examines event handling, broker state, reconciliation and contr
 - Parameter search, short samples and favourable date selection can create misleading results.
 - Paper execution cannot reproduce every real-market behaviour.
 - Network outages and non-atomic broker/database operations create uncertain states.
-- The current design has no verified implementation or performance evidence yet.
+- The opening-range calculation is tested; trading performance and execution remain unverified.
 
 Each limitation should eventually link to a test, measurement, documented assumption or deliberately deferred improvement.
 
@@ -147,45 +146,6 @@ Each limitation should eventually link to a test, measurement, documented assump
 6. Prepare a reproducible demonstration and revise documentation and CV wording around actual evidence.
 
 Do not couple progress to profitability. If the baseline performs poorly, preserve the result and analyse it before changing the rules.
-
-## First development session
-
-Create a small installable repository with src/orb/domain.py, src/orb/session.py, src/orb/strategy.py, tests and a dependency configuration. Implement a validated immutable Bar and an OpeningRange result. Keep broker credentials and database setup out of this increment because neither is needed for the calculation.
-
-Construct 15 consecutive fixture bars with a highest high of 100 and lowest low of 98. Assert the midpoint is 99. Verify that a 09:45 bar is excluded from range construction, a missing minute causes rejection, and naive timestamps are rejected. These tests verify financially meaningful boundaries rather than merely repeating implementation statements.
-
-Next, add a candidate from the first eligible closed breakout bar and test the cutoff. Once this works, the code can be explained line by line and replayed without relying on any external service.
-
-## Learning and interview notes
-
-For every increment, record the problem, implementation, reasons, alternatives, test evidence and remaining limitations. Kiran should be able to trace a fixture through the code and predict its output before running it.
-
-Useful interview topics include separating signals from orders, modelling time correctly, preventing look-ahead bias, why idempotency needs persistent state, why partial fills matter and why shared code does not guarantee identical historical and paper execution.
-
-Suggested explanation once implemented: “I started with a precise strategy contract and deterministic tests, then separated decisions from execution. That let me reuse the strategy for historical replay and paper trading. I explicitly modelled uncertain submissions and reconciled broker state rather than treating a timeout as a failed order.” Only use past tense after those features are complete.
-
-Record AI assistance honestly. The project story should show ownership through design judgement, debugging, verification and an ability to explain the implementation. Demonstrated understanding matters more than claiming every line was written unaided.
-
-## How this document will evolve
-
-After each milestone, update status, completed components, verification evidence, decisions, limitations and the next step. Link to repository commits, tests and reports when they exist. Keep the detailed specification authoritative for behaviour and use decision records to explain changes.
-
-The final version should read as a complete account: initial motivation, strategy hypothesis, architecture, difficult problems, choices made, experiments, results, lessons and further work. Preserve negative findings and unresolved limitations. Remove provisional claims or turn them into clearly dated decisions; do not retrofit the motivation to make results appear inevitable.
-
-### Milestone record template
-
-- Date and commit:
-- Problem addressed:
-- Behaviour implemented:
-- Decision and alternatives:
-- Verification and results:
-- Limitation discovered:
-- What Kiran can now explain:
-- Next step:
-
-### Change log
-
-10 October 2026: Created the project narrative, intended stack, design rationale, evidence register and development sequence. Implementation remains pending.
 
 
 ## First implementation update

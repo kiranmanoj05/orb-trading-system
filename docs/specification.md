@@ -1,12 +1,12 @@
 # ORB Automated Trading System Technical Specification
 
-Prepared for Kiran Manoj • 10 October 2026 • Version 1.1
+Technical specification • 10 October 2026 • Version 1.1
 
 ## Purpose and provenance
 
 Build an event-driven Python system that evaluates an Opening Range Breakout strategy, backtests it, and executes it in an Alpaca paper account. PostgreSQL provides an audit trail. The objective is a working, explainable engineering project with reproducible evidence, rather than an assumed profitable strategy.
 
-This document reconstructs the latest specification from the retrieved conversation summary and expands it with implementation decisions and learning notes. It is not a verbatim export of the earlier response. The baseline rules below preserve the latest version; additional thresholds are labelled proposed. Earlier futures and ML-filter ideas are separate future work and do not change this equities MVP.
+This specification defines the intended MVP behaviour. Additional operational thresholds are labelled proposed.
 
 ## 1 Baseline strategy
 
@@ -88,7 +88,7 @@ A breakout candidate is a decision proposal, not an order. This distinction allo
 
 Position size is the minimum of risk-based size, affordable size, remaining symbol exposure and remaining portfolio exposure. All calculations use a documented entry reference plus a proposed slippage allowance. If quantity is zero, reject. Reject a stop at or above a long entry reference.
 
-Proposed initial engineering defaults, to be configurable and tested: no leverage in our sizing logic, maximum 25% of equity in one symbol, maximum 50% total gross exposure, maximum two open positions, and a 1% session loss gate. These are additions to the recovered specification, not previously agreed performance parameters.
+Proposed initial engineering defaults, to be configurable and tested: no leverage in our sizing logic, maximum 25% of equity in one symbol, maximum 50% total gross exposure, maximum two open positions, and a 1% session loss gate. These are provisional engineering defaults pending validation.
 
 Define the session loss gate against session-start equity using marked equity, including realised and unrealised changes. At the threshold, stop new entries and initiate the documented flatten procedure. Outstanding entry orders count toward reserved exposure. Limits apply atomically when reserving an order, not merely when generating a signal. Stop orders and closing orders remain permitted when new entries are paused.
 
@@ -149,29 +149,8 @@ Use GitHub Actions for deterministic tests without secrets. Broker integration t
 
 Test strategy behaviour at exactly 09:45 and 11:00, daylight-saving transitions, holidays, early closes, incomplete range, duplicate bars, out-of-order input, zero-width range, invalid prices and repeat breakout bars. Test risk with tiny stop distance, zero affordable size, reserved exposure and daily-loss boundaries. Test recovery with timeout after broker acceptance and partial fill during cancellation.
 
-## 12 How we will build and learn together
 
-For each increment, I will implement a small working change and explain the problem it solves, the code flow, alternative designs, why the chosen approach fits this stage, how we verified it and what remains limited. You will get a short interview explanation grounded in the actual code, plus a question or worked example to check understanding.
-
-Keep an architecture decision record for meaningful choices: context, decision, alternatives, consequences and a condition for revisiting it. Examples include bar-close rather than tick-triggered entries, midpoint rather than range-low stops, one process rather than services, and conservative same-bar exit ordering.
-
-Describe this as AI-assisted development honestly if asked. Your ownership should be demonstrated through understanding, tests, debugging and design judgement. Update CV claims to match completed functionality and actual dates; do not claim a paper/live integration or proven risk control before evidence exists.
-
-## 13 First implementation lesson
-
-We start with domain models and the opening-range calculation. No broker is needed to decide whether 15 known bars produce the correct range. This makes the first step deterministic and isolates strategy errors from networking problems.
-
-An immutable Bar makes accidental mutation harder: replaying the same input should not depend on what another component changed. A frozen dataclass is useful, but validation is still necessary; immutability does not guarantee correct data. Use Decimal constructed from strings, since Decimal(0.1) preserves the binary floating-point approximation.
-
-The strategy first needs to distinguish a bar's start time from its availability time. A bar stamped 09:44 belongs to the opening range and only becomes known at 09:45. A bar stamped 09:45 is the first possible breakout bar and becomes known at 09:46. Mixing those meanings causes look-ahead bias.
-
-First test fixture: create 15 consecutive bars from 09:30 with maximum high 100 and minimum low 98. Assert range high 100, low 98 and stop 99. Feed an eligible next bar closing at 100.20 and assert one candidate. Feed another breakout bar and assert no second candidate once the attempt is reserved. Remove one range bar and assert SKIPPED, not a smaller range.
-
-Interview explanation: “I separated deterministic strategy decisions from broker execution so I could test session boundaries and replay market data without credentials. I used the same decision logic in simulation and paper mode, while explicitly modelling different fill behaviour. One important limitation is that minute bars do not reveal the order of stop and target touches, so I used a conservative assumption and reported ambiguous cases.”
-
-An improvement to discuss: move to quote or tick replay for execution realism once the minute-bar baseline is correct. This increases data volume and complexity, so it should address a measured limitation rather than being added for appearance.
-
-## 14 Official integration references
+## 12 Official integration references
 
 Current broker-specific details must be checked when implementing the adapter. References checked on 10 October 2026:
 
