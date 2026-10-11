@@ -11,6 +11,7 @@ from orb.domain import Bar
 from orb.strategy import NEW_YORK, calculate_opening_range
 from orb.replay import load_bars, replay
 from orb.session import exchange_session
+from orb.simulation import ExecutionConfig, simulate
 
 
 def demo() -> None:
@@ -41,6 +42,12 @@ def main() -> None:
     run = commands.add_parser("replay", help="replay a canonical chronological CSV")
     run.add_argument("csv", type=Path)
     run.add_argument("--output", type=Path, help="write signal/session JSON")
+    backtest = commands.add_parser("simulate", help="simulate fixed-share fills and exits")
+    backtest.add_argument("csv", type=Path)
+    backtest.add_argument("--output", type=Path)
+    backtest.add_argument("--quantity", type=int, default=1)
+    backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
+    backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
     args = parser.parse_args()
     if args.command == "session":
         try:
@@ -53,11 +60,13 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"Session error: {exc}\n")
         return
-    if args.command != "replay":
+    if args.command not in ("replay", "simulate"):
         demo()
         return
     try:
-        result = replay(load_bars(args.csv))
+        bars = load_bars(args.csv)
+        result = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
+                  if args.command == "simulate" else replay(bars))
         payload = json.dumps(result.to_dict(), indent=2) + "\n"
         if args.output:
             if args.output.resolve() == args.csv.resolve():

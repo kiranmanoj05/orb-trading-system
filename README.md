@@ -7,8 +7,8 @@ A Python research and paper-trading project implementing Opening Range Breakout.
 The implementation validates completed one-minute bars, calculates a 15-minute
 opening range and emits at most one long breakout candidate per symbol/session.
 An offline CSV replay records candidates and per-session outcomes chronologically.
-Broker integration, risk sizing, simulated fills and paper
-trading are still planned.
+A fixed-share execution simulator records next-minute fills, exits and net P&L.
+Broker integration, account risk sizing and paper trading are still planned.
 This application currently submits no orders.
 
 ## Run locally
@@ -23,6 +23,7 @@ python -m pytest
 python -m orb
 python -m orb replay fixtures/orb_sample.csv --output results/replay.json
 python -m orb session 2026-11-27
+python -m orb simulate fixtures/orb_execution_sample.csv --output results/simulation.json
 ```
 
 ## Baseline
@@ -72,7 +73,8 @@ The schedule is local, cached and versioned; it is not a live halt feed.
 
 Session output includes the open, range end, entry cutoff, planned flatten time
 and close. On 2026-11-27 the close is 13:00 New York time and the flatten plan is
-12:55. This exposes a future execution deadline; no closing orders exist yet.
+12:55. The offline simulator uses this deadline for a market exit at the minute open;
+no broker closing orders exist.
 Candidate cutoff remains 11:00, or the flatten deadline if earlier.
 
 ## Limits
@@ -84,3 +86,35 @@ Tests are software evidence, not trading-performance evidence.
 Detector state is in memory and is not safe across restarts or concurrent event
 workers. A stable signal ID identifies a candidate; persistent reservations and
 broker reconciliation are required before claiming duplicate-order protection.
+
+## Simulated execution
+
+`simulate` reuses replay signals and emits a trade ledger under model
+`minute-long-v1`. The sample is synthetic: entry 100.30, stop 99, actual-fill
+2R target 102.90 and gross/net gain 2.60 for one share with zero costs. This
+checks arithmetic, not market performance. The original 16-bar replay fixture
+has no entry bar and therefore produces an unfilled simulation attempt.
+
+Entry occurs at the exact next minute open, strictly before the entry cutoff.
+A missing entry bar or a fill at/below the stop cancels the attempt. The stop
+stays at the range midpoint; the target is recalculated from the slipped entry.
+Market buys add slippage; stop and flatten market sells subtract it. Targets
+are simulated limit exits at the target or a better opening price, with no
+adverse slippage. Stop gaps fill at the opening price less slippage. If both
+stop and target are touched intrabar, stop wins and `ambiguous_exit` is true.
+Open events precede intrabar extremes; scheduled flatten takes priority at
+its deadline. Open fills carry the bar-start timestamp. Intrabar exit timestamps
+are bar-completion observation times, not claimed exact execution seconds.
+
+Use `--quantity 10 --slippage-bps 10 --fee-per-share 0.01` to declare costs.
+Fees apply per share per side; slippage is a proportion of market-fill price.
+JSON records configuration, model version, replay outcomes, fills, fees and
+closed-trade gross/net P&L. Missing holding minutes and truncated positions are
+`unresolved`, with no invented exit or P&L. Account equity, risk sizing, margin,
+portfolio exposure and performance summaries are not implemented.
+
+This model assumes instantaneous next-open execution and immediate bracket
+activation after entry. It has no spread, queue, latency, volume capacity,
+partial fills or broker fee schedule. Prices are unrounded Decimal values;
+provider adjustments and tradable tick rules require later adapter work.
+Multi-symbol positions are independent fixed-share scenarios, not a portfolio.
