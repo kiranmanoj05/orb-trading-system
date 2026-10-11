@@ -6,7 +6,8 @@ A Python research and paper-trading project implementing Opening Range Breakout.
 
 The implementation validates completed one-minute bars, calculates a 15-minute
 opening range and emits at most one long breakout candidate per symbol/session.
-Broker integration, risk sizing, calendar validation, backtesting and paper
+An offline CSV replay records candidates and per-session outcomes chronologically.
+Broker integration, risk sizing, calendar validation, simulated fills and paper
 trading are still planned.
 This application currently submits no orders.
 
@@ -20,6 +21,7 @@ source .venv/bin/activate
 python -m pip install -e '.[dev]'
 python -m pytest
 python -m orb
+python -m orb replay fixtures/orb_sample.csv --output results/replay.json
 ```
 
 ## Baseline
@@ -40,6 +42,24 @@ is 90 seconds after bar completion. A candidate consumes the session attempt.
 
 The synthetic demonstration uses fixed prices to produce range 98–100, entry
 reference 100.20, stop 99 and planned target 102.60. It requires no credentials.
+
+## Offline replay
+
+The sample CSV contains synthetic prices, not historical market observations.
+Canonical CSV columns are `symbol,start,open,high,low,close,volume`. Timestamps
+must be timezone-aware and minute-aligned. Input must be globally chronological;
+different symbols can share a timestamp, but duplicate symbol/time keys are
+rejected. Provider responses sorted by symbol must be normalised before replay.
+
+The replay clock observes each bar at its end. Only consumed range bars build
+the opening range. A JSON report records candidates and session states; prices
+remain decimal strings. `ready` at dataset end means the observation window is
+unfinished, not a confirmed whole session without a signal. Empty/invalid data
+fails explicitly. Premarket and bars at or after 16:00 New York time are ignored.
+
+Replay currently assumes externally validated exchange days and normal session
+hours. It has no holiday or early-close calendar and makes no fill/P&L claims.
+Final corrected historical bars may differ from the originally streamed bars.
 
 ## Limits
 
