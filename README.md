@@ -118,3 +118,30 @@ activation after entry. It has no spread, queue, latency, volume capacity,
 partial fills or broker fee schedule. Prices are unrounded Decimal values;
 provider adjustments and tradable tick rules require later adapter work.
 Multi-symbol positions are independent fixed-share scenarios, not a portfolio.
+
+## Account snapshot sizing
+
+```bash
+python -m orb size --equity 10000 --cash 10000 --entry 100.30 --stop 99
+```
+
+This hypothetical snapshot returns 24 shares, limited by the default 25%
+single-position notional cap. Defaults also allow 0.5% equity planned stop risk
+and 100% aggregate gross notional exposure. These are research parameters,
+not recommended settings. `--risk-fraction`, `--max-position-fraction`,
+`--max-gross-fraction` and `--gross-exposure` make them explicit.
+`--slippage-bps` and `--fee-per-share` include adverse entry/stop slippage and
+round-trip fees in planned risk; cash capacity includes the entry fee.
+
+`size_long` floors to whole shares and returns the binding constraint and
+planned amounts. Zero capacity reports `below_one_share:<constraint>`. All
+fractions must be positive and at most one; no leverage is allowed. Entry is
+an assumed pre-slippage price strictly above the stop. Exposure is supplied
+as aggregate entry notional, with accepted orders included by the caller.
+
+This is a pure calculator, separate from `simulate`. It does not reserve cash,
+fetch account data, update equity, check snapshot freshness or submit orders.
+Reusing the same snapshot for simultaneous candidates can overallocate funds.
+The next increment must integrate chronological reservations and releases.
+Stop gaps can exceed planned risk; this is not a maximum-loss guarantee.
+Position and gross caps do not measure SPY/QQQ correlation or volatility.

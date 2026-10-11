@@ -12,6 +12,7 @@ from orb.strategy import NEW_YORK, calculate_opening_range
 from orb.replay import load_bars, replay
 from orb.session import exchange_session
 from orb.simulation import ExecutionConfig, simulate
+from orb.risk import AccountSnapshot, RiskLimits, size_long
 
 
 def demo() -> None:
@@ -37,6 +38,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline ORB signal research")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("demo", help="run the synthetic single-signal demonstration")
+    sizing = commands.add_parser("size", help="size a hypothetical long from an account snapshot")
+    for name in ("equity", "cash", "entry", "stop"):
+        sizing.add_argument(f"--{name}", type=Decimal, required=True)
+    for name, default in (("gross-exposure", "0"), ("risk-fraction", "0.005"),
+                          ("max-position-fraction", "0.25"), ("max-gross-fraction", "1"),
+                          ("slippage-bps", "0"), ("fee-per-share", "0")):
+        sizing.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     schedule = commands.add_parser("session", help="inspect a US equity session date")
     schedule.add_argument("date", type=date.fromisoformat)
     run = commands.add_parser("replay", help="replay a canonical chronological CSV")
@@ -49,6 +57,18 @@ def main() -> None:
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
     args = parser.parse_args()
+    if args.command == "size":
+        try:
+            decision = size_long(AccountSnapshot(args.equity, args.cash, args.gross_exposure),
+                                 args.entry, args.stop,
+                                 RiskLimits(args.risk_fraction, args.max_position_fraction,
+                                            args.max_gross_fraction),
+                                 slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share)
+            print(json.dumps({"model_version": "snapshot-long-v1",
+                              "decision": decision.to_dict()}, indent=2))
+        except ValueError as exc:
+            parser.exit(2, f"Sizing error: {exc}\n")
+        return
     if args.command == "session":
         try:
             session = exchange_session(args.date)
