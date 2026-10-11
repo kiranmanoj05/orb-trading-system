@@ -8,7 +8,9 @@ The implementation validates completed one-minute bars, calculates a 15-minute
 opening range and emits at most one long breakout candidate per symbol/session.
 An offline CSV replay records candidates and per-session outcomes chronologically.
 A fixed-share execution simulator records next-minute fills, exits and net P&L.
-Broker integration, account risk sizing and paper trading are still planned.
+A pure cost-aware sizing calculator and sequential shared account ledger are
+implemented separately from the fixed-share simulator. Portfolio replay,
+broker integration and paper trading are still planned.
 This application currently submits no orders.
 
 ## Run locally
@@ -24,6 +26,7 @@ python -m orb
 python -m orb replay fixtures/orb_sample.csv --output results/replay.json
 python -m orb session 2026-11-27
 python -m orb simulate fixtures/orb_execution_sample.csv --output results/simulation.json
+python -m orb account-demo
 ```
 
 ## Baseline
@@ -110,8 +113,8 @@ Use `--quantity 10 --slippage-bps 10 --fee-per-share 0.01` to declare costs.
 Fees apply per share per side; slippage is a proportion of market-fill price.
 JSON records configuration, model version, replay outcomes, fills, fees and
 closed-trade gross/net P&L. Missing holding minutes and truncated positions are
-`unresolved`, with no invented exit or P&L. Account equity, risk sizing, margin,
-portfolio exposure and performance summaries are not implemented.
+`unresolved`, with no invented exit or P&L. This command is not yet connected
+to the standalone sizing calculator or shared account ledger.
 
 This model assumes instantaneous next-open execution and immediate bracket
 activation after entry. It has no spread, queue, latency, volume capacity,
@@ -142,6 +145,35 @@ as aggregate entry notional, with accepted orders included by the caller.
 This is a pure calculator, separate from `simulate`. It does not reserve cash,
 fetch account data, update equity, check snapshot freshness or submit orders.
 Reusing the same snapshot for simultaneous candidates can overallocate funds.
-The next increment must integrate chronological reservations and releases.
+The standalone account ledger below owns reservations and releases; historical
+replay integration is the next increment.
 Stop gaps can exceed planned risk; this is not a maximum-loss guarantee.
 Position and gross caps do not measure SPY/QQQ correlation or volatility.
+
+## Shared account ledger
+
+`AccountLedger` sizes and reserves from its current snapshot in one sequential
+operation. Pending orders hold cash (including entry fees) and gross entry
+notional. A full fill spends cash, releases unused reservation and records an
+open position. Cancellation releases only a pending order. A full exit credits
+proceeds less its fee and records net realised P&L including both side fees.
+Unknown positions retain allocation until an explicit exit resolves them.
+
+The ledger rejects reused IDs and multiple active allocations for one symbol.
+A fill above reserved notional/cash is rejected without releasing funds;
+resizing/cancellation must be explicit. Fill prices are already slipped, so
+costs are not applied twice. Failed transitions leave state unchanged.
+
+`python -m orb account-demo` traces a synthetic lifecycle with initial cash
+10000: reserve 24 SPY and 24 QQQ shares at 100.30, leaving 5185.60 available;
+fill SPY, cancel QQQ, then exit SPY at 102.90. Final cash is 10062.40 and net
+realised P&L is 62.40. This demonstrates accounting, not historical performance.
+
+Equity carries positions at entry cost and deducts paid entry fees; it is not
+marked to market. Gross exposure also uses entry notional. Limits are admission
+checks, not continuously enforced market-value caps. There is no aggregate
+planned-stop-risk or daily-loss cap yet. Full fills only; no partial fills,
+event timestamps, settlement delays, persistence, broker reconciliation or
+concurrent-worker protection. Callers must serialize operations and supply
+chronologically valid events. An insolvent account cannot produce a valid
+sizing snapshot. `simulate` remains an independent fixed-share scenario.
