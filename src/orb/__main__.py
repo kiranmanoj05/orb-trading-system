@@ -2,7 +2,7 @@
 
 import argparse
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -10,6 +10,7 @@ from orb.breakout import BreakoutDetector
 from orb.domain import Bar
 from orb.strategy import NEW_YORK, calculate_opening_range
 from orb.replay import load_bars, replay
+from orb.session import exchange_session
 
 
 def demo() -> None:
@@ -35,10 +36,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline ORB signal research")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("demo", help="run the synthetic single-signal demonstration")
+    schedule = commands.add_parser("session", help="inspect a US equity session date")
+    schedule.add_argument("date", type=date.fromisoformat)
     run = commands.add_parser("replay", help="replay a canonical chronological CSV")
     run.add_argument("csv", type=Path)
     run.add_argument("--output", type=Path, help="write signal/session JSON")
     args = parser.parse_args()
+    if args.command == "session":
+        try:
+            session = exchange_session(args.date)
+            payload = {"date": str(args.date), "state": "open" if session else "closed"}
+            if session is not None:
+                payload.update({name: getattr(session, name).isoformat() for name in
+                                ("opens_at", "range_end", "entry_cutoff", "flatten_at", "closes_at")})
+            print(json.dumps(payload, indent=2))
+        except ValueError as exc:
+            parser.exit(2, f"Session error: {exc}\n")
+        return
     if args.command != "replay":
         demo()
         return

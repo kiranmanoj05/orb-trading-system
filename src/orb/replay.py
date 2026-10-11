@@ -2,7 +2,7 @@
 
 import csv
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
@@ -10,6 +10,7 @@ from typing import Iterable
 from orb.breakout import BreakoutDetector
 from orb.domain import Bar, BreakoutSignal
 from orb.strategy import NEW_YORK, calculate_opening_range
+from orb.session import exchange_session
 
 CSV_FIELDS = ("symbol", "start", "open", "high", "low", "close", "volume")
 
@@ -43,6 +44,9 @@ class SessionOutcome:
     session: date
     state: str
     reason: str | None
+    opens_at: datetime | None = None
+    closes_at: datetime | None = None
+    flatten_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -78,11 +82,12 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
 
     Equal timestamps for different symbols are permitted. Duplicate symbol/time
     keys are rejected, including conflicting revisions. No hidden sort is done.
-    Exchange-day validation is pending: callers must supply valid session data.
+    Exchange-day and early-close validation use the versioned XNYS calendar.
     Ending a dataset while READY means incomplete observation, not a full day
     without a signal. Only sessions with regular-session observations are listed.
     """
     sessions: dict[tuple[str, date], _Session] = {}
+    closed_dates: set[tuple[str, date]] = set()
     signals = []
     seen = set()
     previous: datetime | None = None
@@ -98,12 +103,16 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
         previous = stamp
         count += 1
         local = bar.start.astimezone(NEW_YORK)
-        if not time(9, 30) <= local.time() < time(16):
-            continue
         day = local.date()
+        schedule = exchange_session(day)
+        if schedule is None:
+            closed_dates.add((bar.symbol, day))
+            continue
+        if not schedule.contains_bar(bar.start):
+            continue
         state = sessions.setdefault((bar.symbol, day), _Session())
         observed_at = stamp + timedelta(minutes=1)
-        range_end = datetime.combine(day, time(9, 45), NEW_YORK)
+        range_end = schedule.range_end
         if local < range_end:
             state.range_bars.append(bar)
         # Freeze at the moment the 09:44 bar completes, or skip when a later
@@ -115,7 +124,7 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
             except ValueError as exc:
                 state.skip_reason = str(exc)
             else:
-                state.detector = BreakoutDetector(opening_range)
+                state.detector = BreakoutDetector(opening_range, schedule)
         if state.detector is not None and local >= range_end:
             signal = state.detector.on_bar(bar, observed_at)
             if signal is not None:
@@ -130,5 +139,11 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
         else:
             status = "skipped"
             reason = state.skip_reason or "dataset ended before range completed"
-        outcomes.append(SessionOutcome(symbol, day, status, reason))
+        schedule = exchange_session(day)
+        assert schedule is not None
+        outcomes.append(SessionOutcome(symbol, day, status, reason, schedule.opens_at,
+                                       schedule.closes_at, schedule.flatten_at))
+    outcomes.extend(SessionOutcome(symbol, day, "closed", "not_exchange_session")
+                    for symbol, day in closed_dates)
+    outcomes.sort(key=lambda row: (row.session, row.symbol))
     return ReplayResult(count, tuple(signals), tuple(outcomes))
