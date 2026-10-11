@@ -6,6 +6,7 @@ from hashlib import sha256
 
 from orb.domain import Bar, BreakoutSignal, OpeningRange
 from orb.strategy import NEW_YORK
+from orb.session import ExchangeSession
 
 
 class SignalState(str, Enum):
@@ -25,7 +26,7 @@ class BreakoutDetector:
 
     VERSION = "orb-long-v1"
 
-    def __init__(self, opening_range: OpeningRange) -> None:
+    def __init__(self, opening_range: OpeningRange, session: ExchangeSession | None = None) -> None:
         local_start = opening_range.start.astimezone(NEW_YORK)
         local_end = opening_range.end.astimezone(NEW_YORK)
         if (local_start.time() != time(9, 30)
@@ -34,6 +35,10 @@ class BreakoutDetector:
             raise ValueError("detector requires the 09:30–09:45 New York range")
         self.opening_range = opening_range
         self.cutoff = datetime.combine(local_start.date(), time(11), NEW_YORK)
+        if session is not None:
+            if session.opens_at != opening_range.start or session.range_end != opening_range.end:
+                raise ValueError("opening range does not match exchange session")
+            self.cutoff = session.entry_cutoff
         self.state = SignalState.READY
         self.pause_reason: str | None = None
         self._last_bar: Bar | None = None

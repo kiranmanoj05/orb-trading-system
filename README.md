@@ -7,7 +7,7 @@ A Python research and paper-trading project implementing Opening Range Breakout.
 The implementation validates completed one-minute bars, calculates a 15-minute
 opening range and emits at most one long breakout candidate per symbol/session.
 An offline CSV replay records candidates and per-session outcomes chronologically.
-Broker integration, risk sizing, calendar validation, simulated fills and paper
+Broker integration, risk sizing, simulated fills and paper
 trading are still planned.
 This application currently submits no orders.
 
@@ -22,6 +22,7 @@ python -m pip install -e '.[dev]'
 python -m pytest
 python -m orb
 python -m orb replay fixtures/orb_sample.csv --output results/replay.json
+python -m orb session 2026-11-27
 ```
 
 ## Baseline
@@ -55,16 +56,29 @@ The replay clock observes each bar at its end. Only consumed range bars build
 the opening range. A JSON report records candidates and session states; prices
 remain decimal strings. `ready` at dataset end means the observation window is
 unfinished, not a confirmed whole session without a signal. Empty/invalid data
-fails explicitly. Premarket and bars at or after 16:00 New York time are ignored.
+fails explicitly. Premarket and bars starting at or after the actual session
+close are ignored. Closed-date input is recorded as `closed` with no candidate.
 
-Replay currently assumes externally validated exchange days and normal session
-hours. It has no holiday or early-close calendar and makes no fill/P&L claims.
+Replay uses `exchange-calendars==4.13.2` and the XNYS regular-session schedule,
+including holidays and early closes. It makes no fill/P&L claims.
 Final corrected historical bars may differ from the originally streamed bars.
+
+## Session calendar
+
+The calendar covers 2006-01-01 through 2030-12-31. Dates outside this explicit
+horizon fail rather than falling back to weekday hours. XNYS is the baseline US
+equity session calendar for this SPY/QQQ research model, not per-venue routing.
+The schedule is local, cached and versioned; it is not a live halt feed.
+
+Session output includes the open, range end, entry cutoff, planned flatten time
+and close. On 2026-11-27 the close is 13:00 New York time and the flatten plan is
+12:55. This exposes a future execution deadline; no closing orders exist yet.
+Candidate cutoff remains 11:00, or the flatten deadline if earlier.
 
 ## Limits
 
-The range function expects an exchange session already validated by its caller.
-It does not yet exclude holidays. Data supplied to it must represent completed
+The standalone range function expects a session validated by its caller; the
+replay now performs that check. Data supplied to it must represent completed
 bars; the available_at argument prevents calculating the range before 09:45.
 Tests are software evidence, not trading-performance evidence.
 Detector state is in memory and is not safe across restarts or concurrent event
