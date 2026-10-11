@@ -41,6 +41,32 @@ class OpeningRange:
     high: Decimal
     low: Decimal
 
+    def __post_init__(self) -> None:
+        if not self.symbol or self.symbol != self.symbol.strip().upper():
+            raise ValueError("symbol must be non-empty, uppercase and trimmed")
+        for timestamp in (self.start, self.end):
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise ValueError("range timestamps must be timezone-aware")
+        if self.end <= self.start:
+            raise ValueError("range end must follow start")
+        if any(not isinstance(p, Decimal) or not p.is_finite() or p <= 0
+               for p in (self.high, self.low)) or self.high <= self.low:
+            raise ValueError("range requires finite positive prices and high greater than low")
+
     @property
     def midpoint(self) -> Decimal:
         return (self.high + self.low) / Decimal("2")
+
+
+@dataclass(frozen=True)
+class BreakoutSignal:
+    """A long candidate, not an order, position or guaranteed entry fill."""
+
+    signal_id: str
+    strategy_version: str
+    symbol: str
+    bar_start: datetime
+    observed_at: datetime
+    entry_reference: Decimal
+    stop: Decimal
+    target: Decimal
