@@ -13,6 +13,7 @@ from orb.replay import load_bars, replay
 from orb.session import exchange_session
 from orb.simulation import ExecutionConfig, simulate
 from orb.risk import AccountSnapshot, RiskLimits, size_long
+from orb.account import ledger_demo
 
 
 def demo() -> None:
@@ -38,6 +39,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline ORB signal research")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("demo", help="run the synthetic single-signal demonstration")
+    commands.add_parser("account-demo", help="trace synthetic cash reservations and a full exit")
     sizing = commands.add_parser("size", help="size a hypothetical long from an account snapshot")
     for name in ("equity", "cash", "entry", "stop"):
         sizing.add_argument(f"--{name}", type=Decimal, required=True)
@@ -57,6 +59,9 @@ def main() -> None:
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
     args = parser.parse_args()
+    if args.command == "account-demo":
+        print(json.dumps(ledger_demo(), indent=2))
+        return
     if args.command == "size":
         try:
             decision = size_long(AccountSnapshot(args.equity, args.cash, args.gross_exposure),
