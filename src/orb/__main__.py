@@ -14,6 +14,7 @@ from orb.session import exchange_session
 from orb.simulation import ExecutionConfig, simulate
 from orb.risk import AccountSnapshot, RiskLimits, size_long
 from orb.account import ledger_demo
+from orb.portfolio import replay_portfolio
 
 
 def demo() -> None:
@@ -58,6 +59,13 @@ def main() -> None:
     backtest.add_argument("--quantity", type=int, default=1)
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
+    portfolio = commands.add_parser("portfolio", help="replay fills through one shared account")
+    portfolio.add_argument("csv", type=Path)
+    portfolio.add_argument("--output", type=Path)
+    for name, default in (("initial-cash", "10000"), ("risk-fraction", "0.005"),
+                          ("max-position-fraction", "0.25"), ("max-gross-fraction", "1"),
+                          ("slippage-bps", "0"), ("fee-per-share", "0")):
+        portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
     if args.command == "account-demo":
         print(json.dumps(ledger_demo(), indent=2))
@@ -85,14 +93,20 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"Session error: {exc}\n")
         return
-    if args.command not in ("replay", "simulate"):
+    if args.command not in ("replay", "simulate", "portfolio"):
         demo()
         return
     try:
         bars = load_bars(args.csv)
-        result = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
-                  if args.command == "simulate" else replay(bars))
-        payload = json.dumps(result.to_dict(), indent=2) + "\n"
+        if args.command == "portfolio":
+            result_dict = replay_portfolio(
+                bars, args.initial_cash,
+                RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction),
+                slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share)
+        else:
+            result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
+                  if args.command == "simulate" else replay(bars)).to_dict()
+        payload = json.dumps(result_dict, indent=2) + "\n"
         if args.output:
             if args.output.resolve() == args.csv.resolve():
                 raise ValueError("output must not overwrite input CSV")

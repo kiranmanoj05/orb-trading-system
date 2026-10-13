@@ -9,8 +9,8 @@ opening range and emits at most one long breakout candidate per symbol/session.
 An offline CSV replay records candidates and per-session outcomes chronologically.
 A fixed-share execution simulator records next-minute fills, exits and net P&L.
 A pure cost-aware sizing calculator and sequential shared account ledger are
-implemented separately from the fixed-share simulator. Portfolio replay,
-broker integration and paper trading are still planned.
+connected through chronological shared-account portfolio replay.
+Broker integration and paper trading are still planned.
 This application currently submits no orders.
 
 ## Run locally
@@ -146,7 +146,7 @@ This is a pure calculator, separate from `simulate`. It does not reserve cash,
 fetch account data, update equity, check snapshot freshness or submit orders.
 Reusing the same snapshot for simultaneous candidates can overallocate funds.
 The standalone account ledger below owns reservations and releases; historical
-replay integration is the next increment.
+replay integration is provided by `portfolio` below.
 Stop gaps can exceed planned risk; this is not a maximum-loss guarantee.
 Position and gross caps do not measure SPY/QQQ correlation or volatility.
 
@@ -177,3 +177,41 @@ event timestamps, settlement delays, persistence, broker reconciliation or
 concurrent-worker protection. Callers must serialize operations and supply
 chronologically valid events. An insolvent account cannot produce a valid
 sizing snapshot. `simulate` remains an independent fixed-share scenario.
+
+
+## Chronological portfolio replay
+
+```bash
+python -m orb portfolio fixtures/orb_execution_sample.csv --initial-cash 10000 --output results/portfolio.json
+```
+
+The synthetic fixture sizes 24 shares, fills at 100.30 and exits at 102.90.
+With zero costs, final cash is 10062.40 and realised P&L is 62.40. This is
+accounting evidence from invented bars, not historical strategy performance.
+
+Options: `--risk-fraction`, `--max-position-fraction`, `--max-gross-fraction`,
+`--slippage-bps` and `--fee-per-share` use the same sizing/cost contracts.
+The account begins entirely in cash. Sizing and immediate full reservation/fill
+occur at the executable next open, using that open and the current account.
+Quantity-independent fill paths reuse `simulate`; future outcomes never enter
+the admission snapshot. This depends on no volume/market-impact modelling.
+
+Events are applied chronologically. Existing exits at a timestamp precede
+entries, and simultaneous entries sort alphabetically by symbol then signal ID.
+Intrabar exits release resources only at minute completion. A new position's
+same-open exit follows all entries at that timestamp. Equal-time CSV row order
+does not affect results; globally out-of-order input is still rejected.
+The tie convention assumes instantaneous access to proceeds, not settlement.
+
+JSON includes all candidates (including unfilled/rejected), sizing decisions,
+accepted entry/exit snapshots and a final ledger. Missing/truncated positions
+retain entry-cost exposure across later sessions; another candidate in the same
+symbol is rejected. Unknown positions are labelled unresolved at evaluation end.
+Rejected trades contain no hypothetical fills or P&L.
+
+Carrying equity uses entry cost, not market marks. No drawdown, historical
+performance report, aggregate stop-risk cap, daily-loss control, latency, partial
+fills, durable state or broker orders are provided. Full-input and snapshot
+storage are suitable for small research fixtures, not large production streams.
+Next: reproducible evaluation identities and summaries that expose incomplete
+results before real historical-data integration.
