@@ -17,6 +17,7 @@ from orb.portfolio import replay_portfolio
 from orb.risk import RiskLimits
 from orb.session import exchange_session
 from orb.strategy import NEW_YORK
+from orb.valuation import market_valuation
 
 
 def _decimal(value: Decimal) -> str:
@@ -114,8 +115,9 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
     complete = bool(coverage) and not incomplete_sessions and not (
         counts["unresolved"] or counts["unfilled"])
+    valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v1",
+        "schema_version": "orb-evaluation-v2",
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -150,18 +152,19 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                           "flat": sum(p == 0 for p in pnls),
                           "win_fraction": str(Decimal(sum(p > 0 for p in pnls)) / len(pnls)) if pnls else None},
         "unresolved_signal_ids": [t["signal_id"] for t in trades if t["status"] == "unresolved"],
-        "total_return": None, "max_drawdown": None,
+        "total_return": valuation["total_return"], "max_drawdown": valuation["max_drawdown"],
         "limitations": [
             "Realised P&L and win fraction describe closed trades only; unknown exits are not zero.",
             "Completeness checks declared dates only; omitted dates outside those bounds are unknown.",
             "Data labels are user assertions; no provider provenance or historical performance is verified.",
-            "Entry-cost equity is not market-marked; total return and drawdown are not calculated.",
+            "Market valuation is reporting-only; sizing still uses entry-cost equity/exposure.",
+            "Return and sampled drawdown are not calculated for incomplete coverage or outcomes.",
             "Instantaneous full fills, stop-first intrabar ambiguity and no volume or settlement model.",
         ],
     }
     return {"evaluation_id": _digest(manifest), "manifest": manifest,
             "environment": {"python": platform.python_version()},
-            "summary": summary, "coverage": coverage, "portfolio": result}
+            "summary": summary, "coverage": coverage, "portfolio": result, "valuation": valuation}
 
 
 def render_report(result: dict) -> str:
@@ -180,7 +183,10 @@ def render_report(result: dict) -> str:
     lines += ["", f"Closed-trade net P&L only: {s['closed_subset']['net_pnl']}",
               f"Closed-trade win fraction: {s['closed_subset']['win_fraction']}",
               f"Ambiguous closed exits: {s['ambiguous_closed_exits']}",
-              "Total return and market drawdown: not calculated.", "",
+              f"Total return: {s['total_return']} (not calculated when incomplete)",
+              f"Minute-sampled maximum drawdown: {s['max_drawdown']}",
+              f"Missing-mark samples: {result['valuation']['missing_mark_samples']}",
+              "Valuation is reporting-only; sizing remains at entry cost.", "",
               "## Coverage", "", "| Session | Symbol | State | Missing / expected minutes |",
               "| --- | --- | --- | ---: |"]
     lines += [f"| {c['session']} | {c['symbol']} | {c['state']} | {c['missing_minutes']} / {c['expected_minutes']} |"
