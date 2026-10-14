@@ -215,3 +215,43 @@ fills, durable state or broker orders are provided. Full-input and snapshot
 storage are suitable for small research fixtures, not large production streams.
 Next: reproducible evaluation identities and summaries that expose incomplete
 results before real historical-data integration.
+
+## Reproducible evaluation
+
+```bash
+python -m orb evaluate fixtures/orb_execution_sample.csv \
+  --data-label synthetic-fixture \
+  --output results/evaluation.json --report results/evaluation.md
+```
+
+Uses the same baseline strategy, fills and shared account as `portfolio`.
+Every candidate remains visible as closed, unresolved, unfilled or rejected.
+Net P&L and win fraction are explicitly the **closed subset**, never a claim
+about unknown exits. Total return and drawdown remain null until market-marked
+accounting exists. The fixture's realised 62.40 is synthetic accounting evidence.
+
+Coverage expects both SPY and QQQ on every exchange session within the date
+scope, including all regular-session minutes and early closes. An entirely
+absent symbol/day is missing; a missing minute is incomplete even if a trade
+already closed. This strict data audit is separate from strategy outcomes.
+Without date flags, scope is only the observed New York date span. To audit
+omitted leading/trailing sessions, provide **both** `--start-session YYYY-MM-DD`
+and `--end-session YYYY-MM-DD`. Bars outside those bounds are rejected.
+Missing data beyond the declared scope cannot be inferred.
+
+The evaluation ID hashes canonical UTC bars, exact normalised decimal values,
+volume, configuration, scope, data label, shipped Python source hashes and
+calendar/dependency versions. Equal-time symbol ordering, timezone spelling,
+equivalent decimal spelling and file location do not change this identity.
+Changing prices, volume, limits, labels, source or dependencies does.
+No generated timestamp enters the report, so repeated runs in the same
+environment produce identical JSON and Markdown. Python version is disclosed
+separately. Preserve the input CSV, JSON manifest, dependency environment and
+matching source revision to reproduce a run; a fingerprint does not archive
+the data or prove provider provenance. Labels are unverified user assertions.
+
+JSON retains the full portfolio trace and a coverage table, status/reason
+counts, ambiguous exits and unresolved IDs. Markdown is its readable companion.
+Neither output may overwrite input or share the same path. Results are offline;
+no external dataset, news API, broker connection or orders are involved.
+Next: market marks and remaining account risk controls before real-data evaluation.

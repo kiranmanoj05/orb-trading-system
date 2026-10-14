@@ -15,6 +15,7 @@ from orb.simulation import ExecutionConfig, simulate
 from orb.risk import AccountSnapshot, RiskLimits, size_long
 from orb.account import ledger_demo
 from orb.portfolio import replay_portfolio
+from orb.evaluation import evaluate, render_report
 
 
 def demo() -> None:
@@ -59,13 +60,19 @@ def main() -> None:
     backtest.add_argument("--quantity", type=int, default=1)
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
-    portfolio = commands.add_parser("portfolio", help="replay fills through one shared account")
-    portfolio.add_argument("csv", type=Path)
-    portfolio.add_argument("--output", type=Path)
-    for name, default in (("initial-cash", "10000"), ("risk-fraction", "0.005"),
+    for command in ("portfolio", "evaluate"):
+        portfolio = commands.add_parser(command, help="shared account replay or reproducible evaluation")
+        portfolio.add_argument("csv", type=Path)
+        portfolio.add_argument("--output", type=Path)
+        if command == "evaluate":
+            portfolio.add_argument("--report", type=Path, help="write Markdown companion")
+            portfolio.add_argument("--data-label", default="unspecified")
+            portfolio.add_argument("--start-session", type=date.fromisoformat)
+            portfolio.add_argument("--end-session", type=date.fromisoformat)
+        for name, default in (("initial-cash", "10000"), ("risk-fraction", "0.005"),
                           ("max-position-fraction", "0.25"), ("max-gross-fraction", "1"),
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
-        portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
+            portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
     if args.command == "account-demo":
         print(json.dumps(ledger_demo(), indent=2))
@@ -93,25 +100,34 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"Session error: {exc}\n")
         return
-    if args.command not in ("replay", "simulate", "portfolio"):
+    if args.command not in ("replay", "simulate", "portfolio", "evaluate"):
         demo()
         return
     try:
         bars = load_bars(args.csv)
-        if args.command == "portfolio":
-            result_dict = replay_portfolio(
+        if args.command in ("portfolio", "evaluate"):
+            extra = ({"data_label": args.data_label, "start_session": args.start_session,
+                      "end_session": args.end_session} if args.command == "evaluate" else {})
+            result_dict = (evaluate if args.command == "evaluate" else replay_portfolio)(
                 bars, args.initial_cash,
                 RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction),
-                slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share)
+                slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share, **extra)
         else:
             result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
                   if args.command == "simulate" else replay(bars)).to_dict()
         payload = json.dumps(result_dict, indent=2) + "\n"
+        report_path = args.report if args.command == "evaluate" else None
+        destinations = [p.resolve() for p in (args.output, report_path) if p is not None]
+        if args.csv.resolve() in destinations:
+            raise ValueError("output must not overwrite input CSV")
+        if len(set(destinations)) != len(destinations):
+            raise ValueError("JSON output and report must use different paths")
         if args.output:
-            if args.output.resolve() == args.csv.resolve():
-                raise ValueError("output must not overwrite input CSV")
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(payload, encoding="utf-8")
+        if report_path:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(render_report(result_dict), encoding="utf-8")
         print(payload, end="")
     except (ValueError, OSError) as exc:
         parser.exit(2, f"Replay error: {exc}\n")
