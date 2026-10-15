@@ -86,5 +86,5 @@ def market_valuation(bars, portfolio, coverage):
             'max_drawdown': str(drawdown) if eligible else None,
             'limitations': ['Minute samples cannot reveal intraminute drawdown.',
                             'Marks are observed closes, not liquidation quotes; exit fees are not estimated.',
-                            'Sizing and admission still use entry-cost equity and exposure.',
+                            'Admission uses separate fresh marked snapshots; this series is post-event reporting.',
                             'Incomplete coverage or outcomes suppress aggregate return and drawdown.']}

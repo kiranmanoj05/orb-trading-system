@@ -1,6 +1,7 @@
 """Pure, snapshot-based long sizing. No reservations or broker side effects."""
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from decimal import Decimal
 
 
@@ -14,6 +15,7 @@ class RiskLimits:
     risk_fraction: Decimal = Decimal("0.005")
     max_position_fraction: Decimal = Decimal("0.25")
     max_gross_fraction: Decimal = Decimal("1")
+    max_total_risk_fraction: Decimal = Decimal("0.01")
 
     def __post_init__(self):
         for name, value in asdict(self).items():
@@ -27,10 +29,28 @@ class AccountSnapshot:
     equity: Decimal
     available_cash: Decimal
     gross_exposure: Decimal = Decimal("0")
+    committed_stop_risk: Decimal = Decimal("0")
 
     def __post_init__(self):
         for name, value in asdict(self).items():
             _decimal(name, value, positive=name == "equity")
+
+
+@dataclass(frozen=True)
+class MarketMark:
+    """Price at its availability instant, not the candle's start label."""
+
+    price: Decimal
+    available_at: datetime
+    source: str = "completed_close"
+
+    def __post_init__(self):
+        _decimal("mark price", self.price, positive=True)
+        if (not isinstance(self.available_at, datetime) or self.available_at.tzinfo is None
+                or self.available_at.utcoffset() is None):
+            raise ValueError("mark availability must be timezone-aware")
+        if self.source not in ("completed_close", "entry_fill"):
+            raise ValueError("unsupported mark source")
 
 
 @dataclass(frozen=True)
@@ -54,7 +74,7 @@ def size_long(account: AccountSnapshot, entry: Decimal, stop: Decimal,
     """Size at an assumed pre-slippage entry price against a declared snapshot.
 
     Stop risk includes adverse market slippage and round-trip per-share fees.
-    Exposure is entry notional; cash includes the entry fee. The caller must
+    Exposure uses the supplied snapshot; cash includes the entry fee. The caller must
     reserve/reconcile accepted orders and supply a fresh snapshot. Gap losses
     may exceed planned risk. This function neither caps losses nor uses bars.
     """
@@ -77,6 +97,8 @@ def size_long(account: AccountSnapshot, entry: Decimal, stop: Decimal,
         "gross_exposure_cap": int(max(Decimal("0"), account.equity * limits.max_gross_fraction
                                       - account.gross_exposure) // buy),
         "cash_cap": int(account.available_cash // (buy + fee_per_share)),
+        "aggregate_risk_cap": int(max(Decimal("0"),
+            account.equity * limits.max_total_risk_fraction - account.committed_stop_risk) // risk),
     }
     binding = min(caps, key=caps.get)  # Stable tie order is part of the contract.
     quantity = caps[binding]

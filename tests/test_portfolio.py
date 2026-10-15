@@ -13,7 +13,7 @@ from orb.risk import RiskLimits
 from orb.strategy import NEW_YORK
 
 
-ALL = RiskLimits(D('1'), D('1'), D('1'))
+ALL = RiskLimits(D('1'), D('1'), D('1'), D('1'))
 
 
 def path(symbol='SPY', day=(2026, 10, 9), delay=0, exit_after=0, close=True):

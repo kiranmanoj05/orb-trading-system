@@ -1,9 +1,11 @@
 """Sequential, in-memory cash ledger for offline long-only research."""
 
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime
 from decimal import Decimal
+from typing import Mapping
 
-from orb.risk import AccountSnapshot, RiskLimits, SizingDecision, _decimal, size_long
+from orb.risk import AccountSnapshot, MarketMark, RiskLimits, SizingDecision, _decimal, size_long
 
 
 ZERO = Decimal("0")
@@ -19,6 +21,8 @@ class Allocation:
     fee_per_share: Decimal
     reserved_cash: Decimal
     reserved_notional: Decimal
+    committed_stop_risk: Decimal = ZERO
+    slippage_bps: Decimal = ZERO
     entry_price: Decimal | None = None
     entry_fee: Decimal = ZERO
     exit_price: Decimal | None = None
@@ -29,7 +33,8 @@ class Allocation:
 class AccountLedger:
     """Own shared resources; callers serialize all operations.
 
-    Equity carries open positions at entry cost, not a current market mark.
+    snapshot() carries positions at entry cost for standalone compatibility.
+    marked_snapshot() requires exact-time marks for every held symbol.
     Pending orders reserve cash and entry notional without spending cash.
     Only full fills/exits are supported. IDs remain consumed after closure or
     cancellation. State is not durable or safe across concurrent workers.
@@ -68,11 +73,39 @@ class AccountLedger:
         reserved_cash, reserved_notional, position_notional = self._totals()
         return AccountSnapshot(self.cash + position_notional,
                                self.cash - reserved_cash,
-                               position_notional + reserved_notional)
+                               position_notional + reserved_notional,
+                               self.committed_stop_risk)
+
+    @property
+    def committed_stop_risk(self) -> Decimal:
+        """Initial cost-aware stop loss, held until cancellation or full exit.
+
+        Gains never release this budget. This is not mark-to-stop giveback or
+        a guaranteed loss bound; gaps may exceed the assumed stop execution.
+        """
+        return sum((a.committed_stop_risk for a in self.allocations
+                    if a.state in ("reserved", "open", "unresolved")), ZERO)
+
+    def marked_snapshot(self, at: datetime, marks: Mapping[str, MarketMark]) -> AccountSnapshot:
+        if not isinstance(at, datetime) or at.tzinfo is None or at.utcoffset() is None:
+            raise ValueError("snapshot time must be timezone-aware")
+        reserved_cash, reserved_notional, _ = self._totals()
+        positions = ZERO
+        for item in self.allocations:
+            if item.state not in ("open", "unresolved"):
+                continue
+            mark = marks.get(item.symbol)
+            if mark is None or mark.available_at != at:
+                raise ValueError("missing_or_stale_position_mark")
+            positions += mark.price * item.quantity
+        return AccountSnapshot(self.cash + positions, self.cash - reserved_cash,
+                               positions + reserved_notional, self.committed_stop_risk)
 
     def reserve(self, order_id: str, symbol: str, entry: Decimal, stop: Decimal,
                 *, slippage_bps: Decimal = ZERO,
-                fee_per_share: Decimal = ZERO) -> SizingDecision:
+                fee_per_share: Decimal = ZERO,
+                at: datetime | None = None,
+                marks: Mapping[str, MarketMark] | None = None) -> SizingDecision:
         if not isinstance(order_id, str) or not order_id.strip():
             raise ValueError("order ID must be non-empty")
         if order_id in self._allocations:
@@ -82,12 +115,16 @@ class AccountLedger:
         if any(a.symbol == symbol and a.state in ("reserved", "open", "unresolved")
                for a in self.allocations):
             raise ValueError("symbol already has an active allocation")
-        decision = size_long(self.snapshot(), entry, stop, self.limits,
+        if (at is None) != (marks is None):
+            raise ValueError("supply both snapshot time and marks")
+        snapshot = self.snapshot() if marks is None else self.marked_snapshot(at, marks)
+        decision = size_long(snapshot, entry, stop, self.limits,
                              slippage_bps=slippage_bps, fee_per_share=fee_per_share)
         if decision.quantity:
             self._allocations[order_id] = Allocation(
                 order_id, symbol, "reserved", decision.quantity, stop,
-                fee_per_share, decision.cash_required, decision.entry_notional)
+                fee_per_share, decision.cash_required, decision.entry_notional,
+                decision.planned_risk, slippage_bps)
         return decision
 
     def _require(self, order_id: str, *states: str) -> Allocation:
@@ -116,7 +153,10 @@ class AccountLedger:
             raise ValueError("fill exceeds reservation; resize or cancel explicitly")
         self._cash -= notional + fee
         self._allocations[order_id] = replace(item, state="open", entry_price=price,
-                                               entry_fee=fee)
+                                               entry_fee=fee,
+                                               committed_stop_risk=(price - item.stop *
+                                                   (1 - item.slippage_bps / Decimal("10000")) +
+                                                   2 * item.fee_per_share) * item.quantity)
 
     def mark_unresolved(self, order_id: str) -> None:
         item = self._require(order_id, "open")
@@ -147,12 +187,13 @@ class AccountLedger:
                 return [convert(v) for v in value]
             return value
         reserved_cash, reserved_notional, positions = self._totals()
-        return convert({"model_version": "entry-cost-ledger-v1", "cash": self.cash,
+        return convert({"model_version": "stop-risk-ledger-v2", "cash": self.cash,
                         "available_cash": self.cash - reserved_cash,
                         "carrying_equity": self.cash + positions,
                         "reserved_cash": reserved_cash,
                         "gross_exposure": positions + reserved_notional,
                         "realized_pnl": self.realized_pnl,
+                        "committed_stop_risk": self.committed_stop_risk,
                         "allocations": [asdict(a) for a in self.allocations]})
 
 
