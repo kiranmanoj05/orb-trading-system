@@ -255,3 +255,24 @@ counts, ambiguous exits and unresolved IDs. Markdown is its readable companion.
 Neither output may overwrite input or share the same path. Results are offline;
 no external dataset, news API, broker connection or orders are involved.
 Next: market marks and remaining account risk controls before real-data evaluation.
+
+## Completed-minute market valuation
+
+`orb evaluate` now includes a separate `valuation` series. It samples every
+regular-session minute in the declared scope, including gaps and early closes.
+Post-event holdings use that minute's completed close. At the exact entry
+instant the fill price is used, so a later close cannot revalue an earlier
+entry. Existing exit cash takes precedence over a candle close for closed lots.
+Missing held-symbol marks produce null equity/exposure/P&L; prices are never
+carried forward. A later mark values an unresolved holding without inventing
+an exit. Overnight-held positions are unknown at the next session open.
+
+Complete coverage and resolved outcomes are required for total return and
+maximum **minute-sampled** drawdown. These metrics are suppressed otherwise,
+even if the account ends flat. Marks are not executable liquidation quotes;
+unrealised net P&L includes paid entry fees but no hypothetical exit fee.
+Intraminute drawdown remains unobserved. The evaluation schema is now v2.
+
+This is a reporting overlay: admission still uses entry-cost equity/exposure.
+Next: integrate fresh marked snapshots into sizing and implement aggregate
+planned-risk/daily-loss controls before external execution.
