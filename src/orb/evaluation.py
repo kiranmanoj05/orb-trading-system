@@ -80,7 +80,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     slippage_bps = Decimal(_decimal(slippage_bps))
     fee_per_share = Decimal(_decimal(fee_per_share))
     limits = RiskLimits(*(Decimal(_decimal(getattr(limits, name))) for name in
-                          ("risk_fraction", "max_position_fraction", "max_gross_fraction")))
+                          ("risk_fraction", "max_position_fraction", "max_gross_fraction",
+                           "max_total_risk_fraction")))
     result = replay_portfolio(canonical, initial_cash, limits,
                               slippage_bps=slippage_bps, fee_per_share=fee_per_share)
     dataset_rows = [[b.symbol, b.start.isoformat(),
@@ -117,7 +118,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
         counts["unresolved"] or counts["unfilled"])
     valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v2",
+        "schema_version": "orb-evaluation-v3",
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -126,6 +127,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                    "risk_fraction": _decimal(limits.risk_fraction),
                    "max_position_fraction": _decimal(limits.max_position_fraction),
                    "max_gross_fraction": _decimal(limits.max_gross_fraction),
+                   "max_total_risk_fraction": _decimal(limits.max_total_risk_fraction),
                    "slippage_bps": _decimal(slippage_bps),
                    "fee_per_share": _decimal(fee_per_share),
                    "start_session": str(start), "end_session": str(end),
@@ -157,7 +159,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
             "Realised P&L and win fraction describe closed trades only; unknown exits are not zero.",
             "Completeness checks declared dates only; omitted dates outside those bounds are unknown.",
             "Data labels are user assertions; no provider provenance or historical performance is verified.",
-            "Market valuation is reporting-only; sizing still uses entry-cost equity/exposure.",
+            "Admission uses exact-time marked equity/exposure and retains initial stop-risk commitments.",
+            "Stop-risk limits are admission controls, not guaranteed gap-loss ceilings or forced liquidation.",
             "Return and sampled drawdown are not calculated for incomplete coverage or outcomes.",
             "Instantaneous full fills, stop-first intrabar ambiguity and no volume or settlement model.",
         ],
@@ -186,7 +189,8 @@ def render_report(result: dict) -> str:
               f"Total return: {s['total_return']} (not calculated when incomplete)",
               f"Minute-sampled maximum drawdown: {s['max_drawdown']}",
               f"Missing-mark samples: {result['valuation']['missing_mark_samples']}",
-              "Valuation is reporting-only; sizing remains at entry cost.", "",
+              "Admission uses fresh marked snapshots; the series shows post-event valuation.",
+              f"Aggregate planned-risk fraction: {m['config']['max_total_risk_fraction']}", "",
               "## Coverage", "", "| Session | Symbol | State | Missing / expected minutes |",
               "| --- | --- | --- | ---: |"]
     lines += [f"| {c['session']} | {c['symbol']} | {c['state']} | {c['missing_minutes']} / {c['expected_minutes']} |"

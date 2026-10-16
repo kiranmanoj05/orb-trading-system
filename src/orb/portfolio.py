@@ -1,13 +1,15 @@
 """Offline chronological account replay using quantity-independent fill paths."""
 
 from dataclasses import asdict, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Iterable
 
 from orb.account import AccountLedger
 from orb.domain import Bar
-from orb.risk import RiskLimits
+from orb.risk import MarketMark, RiskLimits
+from orb.session import exchange_session
+from orb.strategy import NEW_YORK
 from orb.simulation import ExecutionConfig, simulate
 
 
@@ -31,7 +33,9 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
 
     Fill paths are quantity-independent under the existing no-market-impact
     model. Precomputing them does not admit candidates using their eventual
-    outcome: sizing reads only the current ledger and the entry open. Existing
+    outcome: sizing reads only exact-time marked holdings, committed initial
+    stop risk, current cash and the entry open. Missing held-symbol marks reject
+    admission; there is no entry-cost fallback. Existing
     exits at a timestamp precede new entries; simultaneous entries sort by
     symbol then signal ID. Intrabar exits release resources only at completion.
     A new position's same-open exit follows all entries at that timestamp.
@@ -52,6 +56,13 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                     trades=tuple(sorted(paths.trades,
                                         key=lambda t: (observed[t.signal_id], t.symbol, t.signal_id))))
     opens = {(b.symbol, b.start): b.open for b in data}
+    closes = {}
+    for bar in data:
+        session = exchange_session(bar.start.astimezone(NEW_YORK).date())
+        if session and session.contains_bar(bar.start):
+            closes[(bar.symbol, bar.start + timedelta(minutes=1))] = MarketMark(
+                bar.close, bar.start + timedelta(minutes=1))
+    entry_marks = {}
     events = []
     records = {}
     trace = []
@@ -66,6 +77,25 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     for stamp, _, symbol, key, kind, path in sorted(events):
         if kind == "entry":
             raw = opens[(symbol, stamp)]
+            # Only exact completed-close availability, or a fill already applied
+            # at this instant, may value existing holdings. Never use this
+            # candle's future close or carry a previous minute across a gap.
+            marks = {}
+            missing_marks = []
+            for item in account.allocations:
+                if item.state in ("open", "unresolved"):
+                    mark = entry_marks.get(item.order_id)
+                    if mark is None or mark.available_at != stamp:
+                        mark = closes.get((item.symbol, stamp))
+                    if mark is None:
+                        missing_marks.append(item.symbol)
+                    else:
+                        marks[item.symbol] = mark
+            equity = account.cash + sum((marks[a.symbol].price * a.quantity
+                for a in account.allocations if a.state in ("open", "unresolved")
+                and a.symbol in marks), Decimal("0"))
+            snapshot = (account.marked_snapshot(stamp, marks)
+                        if not missing_marks and equity > 0 else None)
             if any(a.symbol == symbol and a.state in ("reserved", "open", "unresolved")
                    for a in account.allocations):
                 reason = "active_symbol_allocation"
@@ -73,18 +103,21 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
             elif raw <= path.stop:
                 reason = "pre_slippage_entry_at_or_below_stop"
                 decision = None
-            elif account.cash + sum(a.entry_price * a.quantity for a in account.allocations
-                                    if a.state in ("open", "unresolved")) <= 0:
+            elif missing_marks:
+                reason = "missing_or_stale_position_mark"
+                decision = None
+            elif snapshot is None:
                 reason = "account_depleted"
                 decision = None
             else:
                 decision = account.reserve(key, symbol, raw, path.stop,
                                            slippage_bps=slippage_bps,
-                                           fee_per_share=fee_per_share)
+                                           fee_per_share=fee_per_share, at=stamp, marks=marks)
                 reason = decision.reason
             quantity = decision.quantity if decision else 0
             if quantity:
                 account.fill(key, path.entry_price)
+                entry_marks[key] = MarketMark(path.entry_price, stamp, "entry_fill")
                 records[key] = replace(path, quantity=quantity,
                                        gross_pnl=path.gross_pnl * quantity if path.gross_pnl is not None else None,
                                        fees=path.fees * quantity if path.fees is not None else None,
@@ -98,6 +131,9 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
             trace.append({"at": stamp, "kind": "entry" if quantity else "rejected",
                           "signal_id": key, "symbol": symbol,
                           "sizing": decision.to_dict() if decision else None,
+                          "admission_snapshot": asdict(snapshot) if snapshot is not None else None,
+                          "marks": {s: asdict(m) for s, m in sorted(marks.items())},
+                          "missing_mark_symbols": sorted(missing_marks),
                           "reason": reason, "account": account.to_dict()})
         elif records[key].quantity:
             account.close(key, path.exit_price)
@@ -108,9 +144,11 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     for item in account.allocations:
         if item.state == "open":
             account.mark_unresolved(item.order_id)
-    return _json({"model_version": "portfolio-entry-cost-v1",
+    return _json({"model_version": "portfolio-marked-admission-v2",
                   "config": {"initial_cash": initial_cash, "limits": asdict(limits),
                              "slippage_bps": slippage_bps, "fee_per_share": fee_per_share,
+                             "admission_valuation": "exact-time completed closes; same-instant fills",
+                             "aggregate_risk": "initial cost-aware stop risk; release only on cancel/exit",
                              "tie_policy": "existing exits, symbol-ordered entries, same-entry exits"},
                   "replay": paths.replay_result.to_dict(),
                   "trades": [asdict(records[t.signal_id]) for t in paths.trades],

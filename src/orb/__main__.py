@@ -47,6 +47,7 @@ def main() -> None:
         sizing.add_argument(f"--{name}", type=Decimal, required=True)
     for name, default in (("gross-exposure", "0"), ("risk-fraction", "0.005"),
                           ("max-position-fraction", "0.25"), ("max-gross-fraction", "1"),
+                          ("max-total-risk-fraction", "0.01"), ("committed-stop-risk", "0"),
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
         sizing.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     schedule = commands.add_parser("session", help="inspect a US equity session date")
@@ -71,6 +72,7 @@ def main() -> None:
             portfolio.add_argument("--end-session", type=date.fromisoformat)
         for name, default in (("initial-cash", "10000"), ("risk-fraction", "0.005"),
                           ("max-position-fraction", "0.25"), ("max-gross-fraction", "1"),
+                          ("max-total-risk-fraction", "0.01"),
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
@@ -79,12 +81,13 @@ def main() -> None:
         return
     if args.command == "size":
         try:
-            decision = size_long(AccountSnapshot(args.equity, args.cash, args.gross_exposure),
+            decision = size_long(AccountSnapshot(args.equity, args.cash, args.gross_exposure,
+                                                args.committed_stop_risk),
                                  args.entry, args.stop,
                                  RiskLimits(args.risk_fraction, args.max_position_fraction,
-                                            args.max_gross_fraction),
+                                            args.max_gross_fraction, args.max_total_risk_fraction),
                                  slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share)
-            print(json.dumps({"model_version": "snapshot-long-v1",
+            print(json.dumps({"model_version": "snapshot-long-v2",
                               "decision": decision.to_dict()}, indent=2))
         except ValueError as exc:
             parser.exit(2, f"Sizing error: {exc}\n")
@@ -110,7 +113,8 @@ def main() -> None:
                       "end_session": args.end_session} if args.command == "evaluate" else {})
             result_dict = (evaluate if args.command == "evaluate" else replay_portfolio)(
                 bars, args.initial_cash,
-                RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction),
+                RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction,
+                           args.max_total_risk_fraction),
                 slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share, **extra)
         else:
             result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))

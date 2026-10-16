@@ -209,12 +209,11 @@ retain entry-cost exposure across later sessions; another candidate in the same
 symbol is rejected. Unknown positions are labelled unresolved at evaluation end.
 Rejected trades contain no hypothetical fills or P&L.
 
-Carrying equity uses entry cost, not market marks. No drawdown, historical
-performance report, aggregate stop-risk cap, daily-loss control, latency, partial
-fills, durable state or broker orders are provided. Full-input and snapshot
-storage are suitable for small research fixtures, not large production streams.
-Next: reproducible evaluation identities and summaries that expose incomplete
-results before real historical-data integration.
+The ledger still exports explicitly labelled carrying equity/exposure at entry
+cost. Admission now uses separate fresh marked snapshots and an aggregate
+planned-stop-risk cap (see below). Daily-loss controls, latency, partial fills,
+durable state and broker orders remain planned. Full-input and snapshot storage
+are suitable for small research fixtures, not large production streams.
 
 ## Reproducible evaluation
 
@@ -227,8 +226,9 @@ python -m orb evaluate fixtures/orb_execution_sample.csv \
 Uses the same baseline strategy, fills and shared account as `portfolio`.
 Every candidate remains visible as closed, unresolved, unfilled or rejected.
 Net P&L and win fraction are explicitly the **closed subset**, never a claim
-about unknown exits. Total return and drawdown remain null until market-marked
-accounting exists. The fixture's realised 62.40 is synthetic accounting evidence.
+about unknown exits. Total return and minute-sampled drawdown require complete
+coverage and resolved outcomes. The fixture's realised 62.40 is synthetic
+accounting evidence, not observed historical performance.
 
 Coverage expects both SPY and QQQ on every exchange session within the date
 scope, including all regular-session minutes and early closes. An entirely
@@ -254,7 +254,7 @@ JSON retains the full portfolio trace and a coverage table, status/reason
 counts, ambiguous exits and unresolved IDs. Markdown is its readable companion.
 Neither output may overwrite input or share the same path. Results are offline;
 no external dataset, news API, broker connection or orders are involved.
-Next: market marks and remaining account risk controls before real-data evaluation.
+Next: daily-loss controls before real-data evaluation.
 
 ## Completed-minute market valuation
 
@@ -271,8 +271,47 @@ Complete coverage and resolved outcomes are required for total return and
 maximum **minute-sampled** drawdown. These metrics are suppressed otherwise,
 even if the account ends flat. Marks are not executable liquidation quotes;
 unrealised net P&L includes paid entry fees but no hypothetical exit fee.
-Intraminute drawdown remains unobserved. The evaluation schema is now v2.
+Intraminute drawdown remains unobserved. The evaluation schema is now v3.
 
-This is a reporting overlay: admission still uses entry-cost equity/exposure.
-Next: integrate fresh marked snapshots into sizing and implement aggregate
-planned-risk/daily-loss controls before external execution.
+This series remains post-event reporting; admission uses its own fresh marked
+snapshots under the same completed-close timing contract.
+
+## Fresh marked admission and aggregate stop risk
+
+`portfolio` and `evaluate` size each new candidate from current cash, held market
+value and reserved commitments. Every held symbol needs a completed close
+available at that exact timestamp, or a fill already applied at that same
+instant. Neither a stale close nor a future close is accepted. A missing mark
+rejects the candidate as `missing_or_stale_position_mark`; it does not invent
+an exit, release cash or retry the consumed daily candidate. Event evidence
+records the admission snapshot, mark prices/times/sources and missing symbols.
+Simultaneous entries retain alphabetical priority; earlier same-instant fills
+contribute their fill price and paid fee to the next admission snapshot.
+
+The new `--max-total-risk-fraction` defaults to `0.01` (1% of admission equity),
+alongside the unchanged 0.5% per-trade default. This is a declared engineering
+baseline, not a tuned parameter or safety guarantee. Whole-share sizing also
+caps new initial stop risk by the remaining aggregate budget. The initial
+cost-aware risk includes assumed stop-sale slippage and both entry/exit fees.
+Pending orders, open holdings and unresolved holdings keep that commitment.
+Cancellation or full exit releases it; a better confirmed fill can reduce it.
+Marks do not release initial risk, even after an unrealised gain. This controls
+initial capital-at-stop risk, not giveback from current marks or correlation.
+
+For a pure snapshot example with 85 risk already committed and equity 10000:
+
+```bash
+python -m orb size --equity 10000 --cash 10000 --entry 100 --stop 98 \
+  --committed-stop-risk 85 --max-total-risk-fraction 0.01
+```
+
+Expect seven shares and `sized:aggregate_risk_cap`: only 15 aggregate risk
+capacity remains and each share risks 2. Gap losses may exceed planned risk.
+These are admission controls, not forced liquidation or a daily-loss latch.
+Mark losses can leave an existing account above a cap; further capacity is
+then zero. Standalone `AccountLedger.snapshot()` and reservations without
+marks explicitly retain carrying-cost compatibility. Integrated portfolio
+admission always supplies fresh marks and never falls back to entry cost.
+
+Next: a session-scoped daily-loss latch with explicit missing-mark and reset
+rules, followed by historical data integration, recovery and paper execution.
