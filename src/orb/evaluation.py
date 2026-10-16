@@ -38,6 +38,7 @@ def engine_fingerprint() -> str:
 def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
              limits: RiskLimits | None = None, *,
              slippage_bps: Decimal = Decimal("0"), fee_per_share: Decimal = Decimal("0"),
+             daily_loss_fraction: Decimal = Decimal("0.02"),
              data_label: str = "unspecified",
              start_session: date | None = None, end_session: date | None = None) -> dict:
     """Evaluate the fixed SPY/QQQ baseline; never treat absent bars as no trades.
@@ -79,11 +80,13 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     initial_cash = Decimal(_decimal(initial_cash))
     slippage_bps = Decimal(_decimal(slippage_bps))
     fee_per_share = Decimal(_decimal(fee_per_share))
+    daily_loss_fraction = Decimal(_decimal(daily_loss_fraction))
     limits = RiskLimits(*(Decimal(_decimal(getattr(limits, name))) for name in
                           ("risk_fraction", "max_position_fraction", "max_gross_fraction",
                            "max_total_risk_fraction")))
     result = replay_portfolio(canonical, initial_cash, limits,
-                              slippage_bps=slippage_bps, fee_per_share=fee_per_share)
+                              slippage_bps=slippage_bps, fee_per_share=fee_per_share,
+                              daily_loss_fraction=daily_loss_fraction)
     dataset_rows = [[b.symbol, b.start.isoformat(),
                      *(_decimal(p) for p in (b.open, b.high, b.low, b.close)), b.volume]
                     for b in canonical]
@@ -118,7 +121,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
         counts["unresolved"] or counts["unfilled"])
     valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v3",
+        "schema_version": "orb-evaluation-v4",
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -128,6 +131,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                    "max_position_fraction": _decimal(limits.max_position_fraction),
                    "max_gross_fraction": _decimal(limits.max_gross_fraction),
                    "max_total_risk_fraction": _decimal(limits.max_total_risk_fraction),
+                   "daily_loss_fraction": _decimal(daily_loss_fraction),
                    "slippage_bps": _decimal(slippage_bps),
                    "fee_per_share": _decimal(fee_per_share),
                    "start_session": str(start), "end_session": str(end),
@@ -149,6 +153,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
         "trade_reasons": dict(sorted(Counter(t["reason"] for t in trades).items())),
         "session_state_counts": dict(sorted(Counter(s["state"] for s in result["replay"]["sessions"]).items())),
         "ambiguous_closed_exits": sum(t["ambiguous_exit"] for t in closed),
+        "daily_loss_block_reasons": dict(sorted(Counter(
+            s["reason"] for s in result["daily_loss_sessions"] if s["blocked"]).items())),
         "closed_subset": {"count": len(closed), "net_pnl": str(realised),
                           "wins": sum(p > 0 for p in pnls), "losses": sum(p < 0 for p in pnls),
                           "flat": sum(p == 0 for p in pnls),
@@ -161,6 +167,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
             "Data labels are user assertions; no provider provenance or historical performance is verified.",
             "Admission uses exact-time marked equity/exposure and retains initial stop-risk commitments.",
             "Stop-risk limits are admission controls, not guaranteed gap-loss ceilings or forced liquidation.",
+            "Daily loss uses fixed opening equity and minute observations; loss/data gaps latch entry blocking only.",
             "Return and sampled drawdown are not calculated for incomplete coverage or outcomes.",
             "Instantaneous full fills, stop-first intrabar ambiguity and no volume or settlement model.",
         ],
@@ -191,6 +198,8 @@ def render_report(result: dict) -> str:
               f"Missing-mark samples: {result['valuation']['missing_mark_samples']}",
               "Admission uses fresh marked snapshots; the series shows post-event valuation.",
               f"Aggregate planned-risk fraction: {m['config']['max_total_risk_fraction']}", "",
+              f"Daily-loss fraction: {m['config']['daily_loss_fraction']}",
+              f"Blocked session reasons: {s['daily_loss_block_reasons']}", "",
               "## Coverage", "", "| Session | Symbol | State | Missing / expected minutes |",
               "| --- | --- | --- | ---: |"]
     lines += [f"| {c['session']} | {c['symbol']} | {c['state']} | {c['missing_minutes']} / {c['expected_minutes']} |"

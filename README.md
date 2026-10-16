@@ -211,7 +211,7 @@ Rejected trades contain no hypothetical fills or P&L.
 
 The ledger still exports explicitly labelled carrying equity/exposure at entry
 cost. Admission now uses separate fresh marked snapshots and an aggregate
-planned-stop-risk cap (see below). Daily-loss controls, latency, partial fills,
+planned-stop-risk cap and session loss latch (see below). Latency, partial fills,
 durable state and broker orders remain planned. Full-input and snapshot storage
 are suitable for small research fixtures, not large production streams.
 
@@ -254,7 +254,7 @@ JSON retains the full portfolio trace and a coverage table, status/reason
 counts, ambiguous exits and unresolved IDs. Markdown is its readable companion.
 Neither output may overwrite input or share the same path. Results are offline;
 no external dataset, news API, broker connection or orders are involved.
-Next: daily-loss controls before real-data evaluation.
+Next: historical-data ingestion and baseline evaluation with declared provenance.
 
 ## Completed-minute market valuation
 
@@ -271,7 +271,7 @@ Complete coverage and resolved outcomes are required for total return and
 maximum **minute-sampled** drawdown. These metrics are suppressed otherwise,
 even if the account ends flat. Marks are not executable liquidation quotes;
 unrealised net P&L includes paid entry fees but no hypothetical exit fee.
-Intraminute drawdown remains unobserved. The evaluation schema is now v3.
+Intraminute drawdown remains unobserved. The evaluation schema is now v4.
 
 This series remains post-event reporting; admission uses its own fresh marked
 snapshots under the same completed-close timing contract.
@@ -307,11 +307,59 @@ python -m orb size --equity 10000 --cash 10000 --entry 100 --stop 98 \
 
 Expect seven shares and `sized:aggregate_risk_cap`: only 15 aggregate risk
 capacity remains and each share risks 2. Gap losses may exceed planned risk.
-These are admission controls, not forced liquidation or a daily-loss latch.
+These aggregate-risk checks are admission controls, not forced liquidation;
+the separate daily-loss latch is described below.
 Mark losses can leave an existing account above a cap; further capacity is
 then zero. Standalone `AccountLedger.snapshot()` and reservations without
 marks explicitly retain carrying-cost compatibility. Integrated portfolio
 admission always supplies fresh marks and never falls back to entry cost.
 
-Next: a session-scoped daily-loss latch with explicit missing-mark and reset
-rules, followed by historical data integration, recovery and paper execution.
+## Session-scoped daily-loss latch
+
+`portfolio` and `evaluate` accept `--daily-loss-fraction`, default `0.02` (2%).
+This is a provisional engineering baseline, not an optimised strategy input
+or guaranteed maximum loss. The reference is equity at the actual exchange
+session open, fixed for that session rather than a trailing high-water mark.
+When flat, known cash supplies the reference even when bars start later. The
+initial replay assumes the declared cash and no pre-existing inventory.
+Carried inventory without fresh opening marks makes the reference unknown;
+that whole session is blocked as `daily_loss_baseline_unavailable`. Later
+prices never substitute a more convenient baseline.
+
+A dedicated clock checks every regular-session minute, including gaps and
+early closes. Existing exits at a timestamp are applied before its check and
+new entries. Each fill is also checked immediately, so paid entry fees can
+block the next simultaneous candidate. Loss at or above the fraction of opening
+equity latches `daily_loss_limit`. Recovery does not reopen admissions. Missing
+held-symbol equity latches `daily_loss_equity_unavailable`, because an unseen
+loss during a data gap cannot be ruled out. Missing bars while flat do not
+make known cash unknown; the separate coverage audit still reports them.
+
+`daily_loss_sessions` retains opening equity, loss limit, first blocking reason
+and time, and last observation. `daily_loss_observations` retains minute checks
+and after-fill checks, including missing symbols and phase. Entry traces carry
+the guard state. More specific existing rejection diagnostics (active symbol,
+invalid entry, missing current marks or depleted account) retain precedence.
+Evaluation fingerprints the new fraction and reports blocked-session reasons.
+
+The next actual exchange session gets a new reference and guard; weekends and
+holidays do not reset it. An unresolved holding is never released by a reset.
+No forced liquidation, cancellation, pending-order controller or broker kill
+switch is claimed. This in-memory latch is not restart-safe. Minute checks
+cannot detect intraminute dips, and gaps/fees can exceed the threshold before
+observation. For example, a synthetic 31.20 realised loss from opening equity
+10000 exceeds a 0.1% limit of 10 and blocks a later same-instant candidate.
+Reproduce that invented two-symbol case with:
+
+```bash
+python -m orb evaluate fixtures/orb_daily_loss_sample.csv \
+  --daily-loss-fraction 0.001 --data-label synthetic-daily-loss \
+  --output results/daily-loss.json --report results/daily-loss.md
+```
+
+Expect one QQQ stop loss of 31.20, a rejected SPY candidate, cash 9968.80,
+and `daily_loss_limit`. This short fixture is incomplete and synthetic;
+aggregate performance metrics remain null, not historical evidence.
+
+Next: historical-data ingestion/provenance and baseline evaluation, then durable
+order state and failure/recovery exercises before Alpaca paper execution.
