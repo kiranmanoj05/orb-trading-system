@@ -198,7 +198,7 @@ def test_evaluation_identity_includes_aggregate_limit():
     b = evaluate(path(), limits=RiskLimits(max_total_risk_fraction=D('.02')))
     assert a['evaluation_id'] != b['evaluation_id']
     assert b['manifest']['config']['max_total_risk_fraction'] == '0.02'
-    assert b['manifest']['schema_version'] == 'orb-evaluation-v3'
+    assert b['manifest']['schema_version'] == 'orb-evaluation-v4'
 
 
 def test_cli_reports_aggregate_binding_and_validates_limit():

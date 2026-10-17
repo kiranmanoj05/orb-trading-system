@@ -65,6 +65,7 @@ def main() -> None:
         portfolio = commands.add_parser(command, help="shared account replay or reproducible evaluation")
         portfolio.add_argument("csv", type=Path)
         portfolio.add_argument("--output", type=Path)
+        portfolio.add_argument("--daily-loss-fraction", type=Decimal, default=Decimal("0.02"))
         if command == "evaluate":
             portfolio.add_argument("--report", type=Path, help="write Markdown companion")
             portfolio.add_argument("--data-label", default="unspecified")
@@ -115,7 +116,8 @@ def main() -> None:
                 bars, args.initial_cash,
                 RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction,
                            args.max_total_risk_fraction),
-                slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share, **extra)
+                slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share,
+                daily_loss_fraction=args.daily_loss_fraction, **extra)
         else:
             result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
                   if args.command == "simulate" else replay(bars)).to_dict()
