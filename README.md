@@ -361,5 +361,64 @@ Expect one QQQ stop loss of 31.20, a rejected SPY candidate, cash 9968.80,
 and `daily_loss_limit`. This short fixture is incomplete and synthetic;
 aggregate performance metrics remain null, not historical evidence.
 
-Next: historical-data ingestion/provenance and baseline evaluation, then durable
-order state and failure/recovery exercises before Alpaca paper execution.
+## Saved historical-response ingestion and provenance
+
+The offline `import-alpaca` command validates a capture envelope containing an
+explicit request and every saved response page. It creates a new bundle with
+the exact `capture.json`, chronological UTC `bars.csv`, and `manifest.json`.
+The manifest records raw/canonical SHA-256 hashes, request/feed/adjustment,
+declared acquisition time, data kind, page/bar counts and a bundle identity.
+There are no HTTP requests, credentials, paid services or broker orders here.
+
+```bash
+python -m orb import-alpaca fixtures/alpaca_capture_synthetic.json \
+  --out-dir data/synthetic-alpaca-bundle
+python -m orb evaluate-bundle data/synthetic-alpaca-bundle \
+  --daily-loss-fraction 0.001 \
+  --output results/bundle-evaluation.json --report results/bundle-evaluation.md
+```
+
+This explicitly invented 35-bar/two-page fixture reproduces the QQQ loss of
+31.20 and rejected SPY candidate; it is not a downloaded historical dataset.
+Missing-session coverage remains incomplete and aggregate metrics stay null.
+Choose a new output directory when importing again; existing targets are never
+overwritten. Manifest is written last as a completion marker. Interrupted
+writes may leave partial directories, which the reader rejects; this is not a
+crash-atomic database or recovery system. Evaluation outputs must remain outside
+the source bundle, and source files/symlinked bundles cannot be overwritten.
+
+Capture schema `orb-alpaca-capture-v1` requires `provider: alpaca`, explicit
+`data_kind: synthetic|historical`, `retrieved_at`, `request`, and `pages`.
+Each page has the request's `page_token` (null initially) and the response body.
+Unknown fields, including headers/credential metadata, are rejected. The fixture
+is a complete schema example. Request policy fixes SPY/QQQ, `1Min`, `raw`, USD,
+ascending order, `asof: -`, explicit IEX/SIP feed and inclusive aware timestamp
+bounds. Page limits are explicit. Requests must end at least a minute before
+declared retrieval, and each bar must be completed and within bounds.
+
+The token chain must terminate with null; missing/repeated/mismatched tokens,
+duplicate bars, provider-order regressions, bad OHLCV and empty datasets fail.
+Only after validating provider symbol/time order is it normalised to replay
+time/symbol order. Decimal JSON prices never pass through binary floats. Raw
+`n`/`vw` fields are retained in the capture but not used in the OHLCV strategy.
+Extended-hours bars are retained; existing calendar replay decides eligibility.
+No missing bars are interpolated or replaced with flat candles.
+
+`evaluate-bundle` revalidates the raw capture, rederives the canonical CSV and
+manifest, and compares them before evaluating. Its `orb-evaluation-bundle-v1`
+identity binds the source archive as well as strategy/data/configuration.
+Archive integrity does **not** authenticate Alpaca, verify user labels, prove
+that a server supplied every bar, or establish original decision-time versions.
+Both provider authenticity and point-in-time verification remain false. A
+historical label alone never becomes verified provenance or profitability.
+Retrospective bar revisions and feed differences still matter.
+
+Official contracts checked 17 October 2026:
+[historical bars](https://docs.alpaca.markets/us/reference/stockbars) and
+[market-data FAQ](https://docs.alpaca.markets/us/docs/market-data-faq).
+Alpaca returns symbol-first pages; token termination is separate from session
+coverage. IEX is not the consolidated SIP feed. No feed entitlement is assumed.
+
+Next: a bounded authenticated acquisition adapter and real baseline evaluation
+when a permitted data source is available, then durable order state/recovery
+before Alpaca paper execution. Offline importer development requires no keys.
