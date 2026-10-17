@@ -205,4 +205,11 @@ def render_report(result: dict) -> str:
     lines += [f"| {c['session']} | {c['symbol']} | {c['state']} | {c['missing_minutes']} / {c['expected_minutes']} |"
               for c in result["coverage"]]
     lines += ["", "## Limitations", ""] + [f"- {x}" for x in s["limitations"]]
+    source = m["dataset"].get("source_bundle")
+    if source:
+        lines += ["", "## Source archive", "", f"Bundle ID: {source['bundle_id']}",
+                  f"Capture SHA-256: {source['capture_sha256']}",
+                  f"Canonical CSV SHA-256: {source['csv_sha256']}",
+                  f"Kind: {source['data_kind']}; feed: {source['request']['feed']}",
+                  "Archive integrity verified; provider authenticity and point-in-time availability unverified."]
     return "\n".join(lines) + "\n"
