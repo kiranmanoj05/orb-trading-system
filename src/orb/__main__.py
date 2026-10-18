@@ -16,6 +16,7 @@ from orb.risk import AccountSnapshot, RiskLimits, size_long
 from orb.account import ledger_demo
 from orb.portfolio import replay_portfolio
 from orb.evaluation import evaluate, render_report
+from orb.ingestion import evaluate_bundle, import_capture
 
 
 def demo() -> None:
@@ -42,6 +43,9 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("demo", help="run the synthetic single-signal demonstration")
     commands.add_parser("account-demo", help="trace synthetic cash reservations and a full exit")
+    ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
+    ingest.add_argument("capture", type=Path)
+    ingest.add_argument("--out-dir", type=Path, required=True)
     sizing = commands.add_parser("size", help="size a hypothetical long from an account snapshot")
     for name in ("equity", "cash", "entry", "stop"):
         sizing.add_argument(f"--{name}", type=Decimal, required=True)
@@ -61,12 +65,13 @@ def main() -> None:
     backtest.add_argument("--quantity", type=int, default=1)
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
-    for command in ("portfolio", "evaluate"):
+    for command in ("portfolio", "evaluate", "evaluate-bundle"):
         portfolio = commands.add_parser(command, help="shared account replay or reproducible evaluation")
-        portfolio.add_argument("csv", type=Path)
+        portfolio.add_argument("csv", type=Path,
+                               metavar="BUNDLE" if command == "evaluate-bundle" else "CSV")
         portfolio.add_argument("--output", type=Path)
         portfolio.add_argument("--daily-loss-fraction", type=Decimal, default=Decimal("0.02"))
-        if command == "evaluate":
+        if command in ("evaluate", "evaluate-bundle"):
             portfolio.add_argument("--report", type=Path, help="write Markdown companion")
             portfolio.add_argument("--data-label", default="unspecified")
             portfolio.add_argument("--start-session", type=date.fromisoformat)
@@ -77,6 +82,12 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command == "import-alpaca":
+        try:
+            print(json.dumps(import_capture(args.capture, args.out_dir), indent=2))
+        except (ValueError, OSError) as exc:
+            parser.exit(2, f"Import error: {exc}\n")
+        return
     if args.command == "account-demo":
         print(json.dumps(ledger_demo(), indent=2))
         return
@@ -104,15 +115,17 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"Session error: {exc}\n")
         return
-    if args.command not in ("replay", "simulate", "portfolio", "evaluate"):
+    if args.command not in ("replay", "simulate", "portfolio", "evaluate", "evaluate-bundle"):
         demo()
         return
     try:
-        bars = load_bars(args.csv)
-        if args.command in ("portfolio", "evaluate"):
+        bars = args.csv if args.command == "evaluate-bundle" else load_bars(args.csv)
+        if args.command in ("portfolio", "evaluate", "evaluate-bundle"):
             extra = ({"data_label": args.data_label, "start_session": args.start_session,
-                      "end_session": args.end_session} if args.command == "evaluate" else {})
-            result_dict = (evaluate if args.command == "evaluate" else replay_portfolio)(
+                      "end_session": args.end_session} if args.command in ("evaluate", "evaluate-bundle") else {})
+            engine = {"evaluate": evaluate, "evaluate-bundle": evaluate_bundle,
+                      "portfolio": replay_portfolio}[args.command]
+            result_dict = engine(
                 bars, args.initial_cash,
                 RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction,
                            args.max_total_risk_fraction),
@@ -122,10 +135,12 @@ def main() -> None:
             result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
                   if args.command == "simulate" else replay(bars)).to_dict()
         payload = json.dumps(result_dict, indent=2) + "\n"
-        report_path = args.report if args.command == "evaluate" else None
+        report_path = args.report if args.command in ("evaluate", "evaluate-bundle") else None
         destinations = [p.resolve() for p in (args.output, report_path) if p is not None]
         if args.csv.resolve() in destinations:
             raise ValueError("output must not overwrite input CSV")
+        if args.command == "evaluate-bundle" and any(args.csv.resolve() in p.parents for p in destinations):
+            raise ValueError("outputs must remain outside the source bundle")
         if len(set(destinations)) != len(destinations):
             raise ValueError("JSON output and report must use different paths")
         if args.output:
