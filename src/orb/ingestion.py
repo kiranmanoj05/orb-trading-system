@@ -169,7 +169,11 @@ def normalise_capture(raw: bytes):
 
 
 def import_capture(source: Path, destination: Path) -> dict:
-    raw = source.read_bytes()
+    return write_bundle(source.read_bytes(), destination)
+
+
+def write_bundle(raw: bytes, destination: Path) -> dict:
+    """Validate bytes before exclusively creating a completed archive."""
     _, canonical, manifest = normalise_capture(raw)  # Validate before creating output.
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.mkdir()  # Exclusive; never replace even an empty or symlinked target.
