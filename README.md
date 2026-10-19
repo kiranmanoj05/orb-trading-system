@@ -419,6 +419,59 @@ Official contracts checked 17 October 2026:
 Alpaca returns symbol-first pages; token termination is separate from session
 coverage. IEX is not the consolidated SIP feed. No feed entitlement is assumed.
 
-Next: a bounded authenticated acquisition adapter and real baseline evaluation
-when a permitted data source is available, then durable order state/recovery
-before Alpaca paper execution. Offline importer development requires no keys.
+## Bounded read-only historical acquisition
+
+`fetch-alpaca` adds a GET-only client for the fixed HTTPS historical-bars endpoint.
+It uses only `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` from the execution
+environment, never command-line key arguments or credentials in captures.
+Do not paste keys in chat, put them in Git, or upload an environment file.
+There is no order endpoint, host override, automatic entitlement/feed fallback,
+subscription purchase or live-money path.
+
+Inspect a request without credentials, network or writes:
+
+```bash
+python -m orb fetch-alpaca \
+  --start 2026-10-09T13:30:00Z --end 2026-10-09T13:47:00Z \
+  --out-dir data/alpaca-pilot --plan
+```
+
+Once credentials and permitted service access are available, omit `--plan` to
+fetch, validate and publish a new bundle for `evaluate-bundle`. The default feed
+is explicitly IEX; SIP must be requested explicitly and requires applicable
+entitlement. No connectivity, entitlement or free-service guarantee is inferred
+from a successful offline plan. Requests must span at most seven days and end
+at least 16 minutes before the acquisition clock. These are conservative local
+policies, not claims about every provider plan.
+
+Default bounds are 20 pages, 3 attempts/page, 5 MB/page, 25 MB total capture,
+15-second network/read timeout and at most 10 seconds per retry wait. The plan
+shows the maximum HTTP-attempt budget. `--max-pages` can adjust the page bound
+within hard limits; other bounds are explicit `FetchLimits` API settings.
+Timeouts are network/read bounds, not a strict whole-job wall-clock deadline.
+The response reader checks its reading deadline between bounded chunks.
+
+429 and selected transient HTTP/network failures retry only within budget.
+`Retry-After` seconds/dates are respected; an excessive delay stops the request
+instead of retrying early. Other transient failures use bounded backoff.
+Authentication/entitlement failures stop immediately. Redirects are rejected
+before authentication can be forwarded. Errors omit response bodies/credentials,
+and credential echoes in a successful body are refused before archival.
+
+No bundle is published until token termination and strict existing capture
+validation succeed. Reaching a page/byte/retry cap never marks truncated data
+complete. Existing destinations fail before network access. Response numeric
+bytes remain exact inside the capture; headers and credentials are not stored.
+The final exclusive bundle write retains the previously documented partial-write
+limitations. Both authenticity/point-in-time flags remain false: a portable
+archive does not cryptographically attest a completed TLS exchange or original
+decision-time revisions.
+
+Validation for this increment uses fake HTTP transports and a stubbed standard
+HTTP opener, not a real provider run. No actual download or historical result
+is claimed. Official historical-bars/authentication/entitlement references were
+rechecked on 18 October 2026; links are above.
+
+Real acquisition/evaluation is waiting for credentials or a supplied permitted
+capture/bundle. Independent durable state/recovery work can continue meanwhile.
+Broker paper execution still requires its own lifecycle and recovery evidence.

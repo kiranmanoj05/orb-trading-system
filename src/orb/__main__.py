@@ -17,6 +17,7 @@ from orb.account import ledger_demo
 from orb.portfolio import replay_portfolio
 from orb.evaluation import evaluate, render_report
 from orb.ingestion import evaluate_bundle, import_capture
+from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
 
 
 def demo() -> None:
@@ -46,6 +47,13 @@ def main() -> None:
     ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
     ingest.add_argument("capture", type=Path)
     ingest.add_argument("--out-dir", type=Path, required=True)
+    fetch = commands.add_parser("fetch-alpaca", help="bounded read-only historical capture; environment credentials only")
+    fetch.add_argument("--start", required=True)
+    fetch.add_argument("--end", required=True)
+    fetch.add_argument("--feed", choices=("iex", "sip"), default="iex")
+    fetch.add_argument("--out-dir", type=Path, required=True)
+    fetch.add_argument("--max-pages", type=int, default=20)
+    fetch.add_argument("--plan", action="store_true", help="show request/limits without credentials, network or writes")
     sizing = commands.add_parser("size", help="size a hypothetical long from an account snapshot")
     for name in ("equity", "cash", "entry", "stop"):
         sizing.add_argument(f"--{name}", type=Decimal, required=True)
@@ -82,6 +90,16 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command == "fetch-alpaca":
+        try:
+            limits = FetchLimits(max_pages=args.max_pages)
+            result = (acquisition_plan(args.start, args.end, feed=args.feed, limits=limits)
+                      if args.plan else acquire_bundle(args.start, args.end, args.out_dir,
+                                                       feed=args.feed, limits=limits))
+            print(json.dumps(result, indent=2))
+        except (ValueError, OSError) as exc:
+            parser.exit(2, f"Acquisition error: {exc}\n")
+        return
     if args.command == "import-alpaca":
         try:
             print(json.dumps(import_capture(args.capture, args.out_dir), indent=2))
