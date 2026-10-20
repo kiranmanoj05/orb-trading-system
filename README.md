@@ -11,6 +11,8 @@ A fixed-share execution simulator records next-minute fills, exits and net P&L.
 A pure cost-aware sizing calculator and sequential shared account ledger are
 connected through chronological shared-account portfolio replay.
 Broker integration and paper trading are still planned.
+An independent SQLite entry-intent journal now provides atomic local claims,
+restart evidence and cumulative fill observations for future paper integration.
 This application currently submits no orders.
 
 ## Run locally
@@ -475,3 +477,69 @@ rechecked on 18 October 2026; links are above.
 Real acquisition/evaluation is waiting for credentials or a supplied permitted
 capture/bundle. Independent durable state/recovery work can continue meanwhile.
 Broker paper execution still requires its own lifecycle and recovery evidence.
+
+## Durable paper-entry intents and restart exercise
+
+`orb.journal` is an independent persistence boundary, not a running broker
+service or a checkpoint of the offline portfolio. It stores validated baseline
+signals, whole-share quantities and a caller-supplied SHA-256 context identity
+(configuration/evidence). It does not calculate or certify that identity's
+content. A file is bound to one explicit `paper:<account>` scope and schema
+version; a mismatched account, unknown version or foreign database fails closed.
+
+`prepare` reserves one admitted entry intent per symbol/session. An exact retry
+returns the existing row, while changed prices, quantity or context fail.
+`claim` requires its expected revision, commits `dispatching` before returning,
+and can succeed once. It refuses stale signals (>90 seconds after bar completion)
+and submission at/after the entry cutoff. A future dispatcher must **also**
+revalidate current risk, cash, data, kill state and the session before claiming;
+the journal alone does not grant trading permission.
+
+After stopping old dispatchers, explicit `recover` turns interrupted
+`dispatching` claims into `unknown`. Unknown, accepted and partial intents must
+be reconciled using the stable `EntryIntent.client_order_id` (`orb-<signal_id>`)
+and broker evidence. A timeout or missing order lookup never implies rejection
+and never makes an intent dispatchable again. Even a crash before the actual
+send can therefore sacrifice an entry opportunity; avoiding blind duplicates
+is the chosen safety tradeoff. Prepared intents remain evidence, not automatic
+restart commands. Existing attempts are never released by changing sessions.
+
+`observe` consumes adapter-normalised **cumulative** filled quantity/notional,
+not incremental fills or average prices. Exact duplicate event IDs are harmless;
+conflicting duplicates, backwards quantities/notional, changed broker IDs,
+stale revisions and terminal amendments fail closed. A partial cancellation or
+expiry retains filled shares and notional. `filled_shares` reports cumulative
+entry-fill evidence, **not** current positions after exits. No cash, fees, exit
+ledger, detector attempt history, daily-loss latch or risk reservations are
+restored by this component. Rejected risk candidates still need durable
+coordinator integration before the one-candidate rule survives a full restart.
+
+Run the invented exercise into a **new** path (the parent must exist):
+
+```bash
+python -m orb recovery-demo --db results/recovery.sqlite
+python -m orb journal-inspect --db results/recovery.sqlite \
+  --account-scope paper:synthetic-demo
+```
+
+The demo persists two ten-share intents. SPY has two synthetic shares filled at
+100.20 (200.40 cumulative notional), then the rest is cancelled; QQQ restarts as
+unknown. Nothing is submitted or downloaded. Inspection does not run recovery
+or modify lifecycle state, and missing files fail rather than being created.
+The demo refuses existing paths. Operational SQLite files/companions are ignored
+by Git; keep them outside source, and keep both project documents separate.
+
+Local SQLite uses `BEGIN IMMEDIATE`, a five-second lock timeout, foreign keys,
+`synchronous=FULL` and rollback journaling. Audit append and state/revision update
+share a transaction. Competing connections may fail with a lock error; callers
+must not send on any claim error. Use local filesystems, one connection per
+worker, and stop old dispatchers before recovery. Schema migrations, distributed
+leases, backups and protection against manual tampering are not implemented.
+Abrupt subprocess-exit tests establish process-restart behaviour, not hardware
+power-loss guarantees. Official design references:
+[transactions](https://www.sqlite.org/lang_transaction.html) and
+[atomic commit](https://www.sqlite.org/atomiccommit.html), checked 19 October 2026.
+
+Next: connect durable candidate/risk decisions, account state and session loss
+latches to a recovery coordinator with reconciliation gates. An actual Alpaca
+paper adapter and real historical baseline evidence remain separate milestones.

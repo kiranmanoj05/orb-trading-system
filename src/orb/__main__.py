@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sqlite3
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -18,6 +19,7 @@ from orb.portfolio import replay_portfolio
 from orb.evaluation import evaluate, render_report
 from orb.ingestion import evaluate_bundle, import_capture
 from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
+from orb.journal import IntentJournal, recovery_demo
 
 
 def demo() -> None:
@@ -44,6 +46,11 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("demo", help="run the synthetic single-signal demonstration")
     commands.add_parser("account-demo", help="trace synthetic cash reservations and a full exit")
+    durable_demo = commands.add_parser("recovery-demo", help="write a new synthetic SQLite restart exercise; no orders")
+    durable_demo.add_argument("--db", type=Path, required=True)
+    inspect = commands.add_parser("journal-inspect", help="inspect an existing paper-intent journal without recovery")
+    inspect.add_argument("--db", type=Path, required=True)
+    inspect.add_argument("--account-scope", required=True)
     ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
     ingest.add_argument("capture", type=Path)
     ingest.add_argument("--out-dir", type=Path, required=True)
@@ -90,6 +97,17 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command in ("recovery-demo", "journal-inspect"):
+        try:
+            if args.command == "recovery-demo":
+                result = recovery_demo(args.db)
+            else:
+                with IntentJournal(args.db, args.account_scope, create=False) as journal:
+                    result = journal.snapshot()
+            print(json.dumps(result, indent=2))
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            parser.exit(2, f"Journal error: {exc}\n")
+        return
     if args.command == "fetch-alpaca":
         try:
             limits = FetchLimits(max_pages=args.max_pages)

@@ -10,6 +10,11 @@ dist/
 !.env.example
 data/
 results/
+# Local operational state and SQLite rollback/WAL companions
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
 .DS_Store
 # Personal study material must remain outside version control
 personal-notes/
