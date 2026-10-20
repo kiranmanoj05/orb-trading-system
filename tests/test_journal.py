@@ -453,3 +453,26 @@ def test_demo_cli_reopens_without_mutation_and_refuses_overwrite_or_missing_insp
     missing = tmp_path / "missing.sqlite"
     failed = subprocess.run(command + ["journal-inspect", "--db", str(missing), "--account-scope", SCOPE], capture_output=True)
     assert failed.returncode == 2 and not missing.exists()
+
+
+def test_withdrawn_intent_is_terminal_but_not_a_broker_rejection(journal):
+    journal.prepare(intent(), AT)
+    journal.withdraw(intent().signal_id, expected_revision=0, at=AT + timedelta(hours=8))
+    assert journal.get(intent().signal_id)["state"] == "withdrawn"
+    before = journal.snapshot()
+    with pytest.raises(JournalError):
+        journal.claim(intent().signal_id, expected_revision=1, at=AT + timedelta(hours=8))
+    with pytest.raises(JournalError):
+        observe(journal, state="withdrawn")
+    assert journal.snapshot() == before
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_withdraw_requires_current_revision_and_never_releases_claimed_order(journal, claimed):
+    journal.prepare(intent(), AT)
+    if claimed:
+        journal.claim(intent().signal_id, expected_revision=0, at=AT)
+    before = journal.snapshot()
+    with pytest.raises(JournalError):
+        journal.withdraw(intent().signal_id, expected_revision=1 if not claimed else 1, at=AT)
+    assert journal.snapshot() == before

@@ -20,6 +20,7 @@ from orb.evaluation import evaluate, render_report
 from orb.ingestion import evaluate_bundle, import_capture
 from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
 from orb.journal import IntentJournal, recovery_demo
+from orb.coordinator import CoordinatorConfig, DurableCoordinator, coordinator_demo
 
 
 def demo() -> None:
@@ -51,6 +52,16 @@ def main() -> None:
     inspect = commands.add_parser("journal-inspect", help="inspect an existing paper-intent journal without recovery")
     inspect.add_argument("--db", type=Path, required=True)
     inspect.add_argument("--account-scope", required=True)
+    coordinator = commands.add_parser("coordinator-demo", help="new synthetic durable account/risk/loss exercise; no broker")
+    coordinator.add_argument("--db", type=Path, required=True)
+    coordinator_inspect = commands.add_parser("coordinator-inspect", help="reconstruct an existing offline coordinator")
+    coordinator_inspect.add_argument("--db", type=Path, required=True)
+    coordinator_inspect.add_argument("--account-scope", required=True)
+    for name, default in (("initial-cash", "10000"), ("daily-loss-fraction", "0.02"),
+                          ("slippage-bps", "0"), ("fee-per-share", "0"),
+                          ("risk-fraction", "0.005"), ("max-position-fraction", "0.25"),
+                          ("max-gross-fraction", "1"), ("max-total-risk-fraction", "0.01")):
+        coordinator_inspect.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
     ingest.add_argument("capture", type=Path)
     ingest.add_argument("--out-dir", type=Path, required=True)
@@ -97,6 +108,21 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command in ("coordinator-demo", "coordinator-inspect"):
+        try:
+            if args.command == "coordinator-demo":
+                result = coordinator_demo(args.db)
+            else:
+                config = CoordinatorConfig(initial_cash=args.initial_cash, daily_loss_fraction=args.daily_loss_fraction,
+                    slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share,
+                    limits=RiskLimits(args.risk_fraction, args.max_position_fraction,
+                                      args.max_gross_fraction, args.max_total_risk_fraction))
+                with DurableCoordinator(args.db, args.account_scope, config, create=False) as coordinator:
+                    result = coordinator.snapshot()
+            print(json.dumps(result, indent=2))
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            parser.exit(2, f"Coordinator error: {exc}\n")
+        return
     if args.command in ("recovery-demo", "journal-inspect"):
         try:
             if args.command == "recovery-demo":

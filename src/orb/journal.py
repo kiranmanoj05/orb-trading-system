@@ -94,8 +94,8 @@ class EntryIntent:
         return "orb-" + self.signal_id
 
 
-TERMINAL = frozenset(("filled", "cancelled", "rejected", "expired"))
-OBSERVATIONS = frozenset(("accepted", "partial", *TERMINAL))
+OBSERVATIONS = frozenset(("accepted", "partial", "filled", "cancelled", "rejected", "expired"))
+TERMINAL = frozenset(("filled", "cancelled", "rejected", "expired", "withdrawn"))
 
 
 class IntentJournal:
@@ -140,10 +140,14 @@ class IntentJournal:
                         sequence INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
                         signal_id TEXT NOT NULL REFERENCES intents(signal_id),
                         payload TEXT NOT NULL, observed_at TEXT NOT NULL)""")
-                if tables and tables != {"metadata", "intents", "events"}:
+                base_tables = {"metadata", "intents", "events"}
+                coordinator_tables = base_tables | {"coordinator_config", "coordinator_events"}
+                if tables and tables not in (base_tables, coordinator_tables):
                     raise JournalError("unrecognised journal schema")
                 rows = self._db.execute("SELECT version, account_scope FROM metadata").fetchall()
-                if len(rows) != 1 or tuple(rows[0]) != (1, account_scope):
+                if (len(rows) != 1 or rows[0]["account_scope"] != account_scope
+                        or rows[0]["version"] not in (1, 2)
+                        or (tables and tables != (base_tables if rows[0]["version"] == 1 else coordinator_tables))):
                     raise JournalError("journal version or paper account scope mismatch")
                 if self._db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise JournalError("journal integrity check failed")
@@ -153,13 +157,20 @@ class IntentJournal:
 
     @contextmanager
     def _transaction(self):
-        self._db.execute("BEGIN IMMEDIATE")
+        # The coordinator owns the outer atomic command; nested journal writes
+        # use savepoints rather than committing a reservation independently.
+        nested = self._db.in_transaction
+        self._db.execute("SAVEPOINT orb_journal" if nested else "BEGIN IMMEDIATE")
         try:
             yield
-            self._db.execute("COMMIT")
+            self._db.execute("RELEASE orb_journal" if nested else "COMMIT")
         except BaseException:
             if self._db.in_transaction:
-                self._db.execute("ROLLBACK")
+                if nested:
+                    self._db.execute("ROLLBACK TO orb_journal")
+                    self._db.execute("RELEASE orb_journal")
+                else:
+                    self._db.execute("ROLLBACK")
             raise
 
     def close(self):
@@ -240,6 +251,17 @@ class IntentJournal:
                 self._event("recover:" + row["signal_id"], row["signal_id"], '{"state":"unknown"}', stamp)
         return self.snapshot()
 
+    def withdraw(self, signal_id: str, *, expected_revision: int, at: datetime):
+        """Release a never-claimed local intent; never cancel an uncertain order."""
+        stamp = _stamp(at)
+        with self._transaction():
+            row = self._row(signal_id)
+            if row["state"] != "prepared":
+                raise JournalError("only an unclaimed intent can be withdrawn locally")
+            self._change(row, "withdrawn", stamp, expected_revision)
+            self._event("withdraw:" + signal_id, signal_id, '{"state":"withdrawn"}', stamp)
+            return self._row(signal_id)
+
     def observe(self, signal_id: str, *, event_id: str, state: str, filled_quantity: int,
                 filled_notional: Decimal, broker_order_id: str, expected_revision: int, at: datetime):
         """Apply adapter-normalised cumulative evidence, not incremental fills.
@@ -289,18 +311,22 @@ class IntentJournal:
 
     def snapshot(self):
         # One read transaction prevents mixed versions if another connection writes.
-        self._db.execute("BEGIN")
+        nested = self._db.in_transaction
+        if not nested:
+            self._db.execute("BEGIN")
         try:
             rows = [dict(r) for r in self._db.execute("SELECT * FROM intents ORDER BY session,symbol")]
             events = [dict(r) for r in self._db.execute("SELECT * FROM events ORDER BY sequence")]
-            return {"schema_version": 1, "account_scope": self.account_scope, "intents": rows, "events": events,
+            version = self._db.execute("SELECT version FROM metadata").fetchone()[0]
+            return {"schema_version": version, "account_scope": self.account_scope, "intents": rows, "events": events,
                     "reconciliation_required": [r["signal_id"] for r in rows
                                                 if r["state"] not in TERMINAL and r["state"] != "prepared"],
                     "filled_shares": {r["signal_id"]: r["filled_quantity"] for r in rows if r["filled_quantity"]},
                     "automatic_resubmission": False, "cash_ledger_restored": False,
                     "prepared_requires_fresh_admission": True}
         finally:
-            self._db.execute("ROLLBACK")
+            if not nested:
+                self._db.execute("ROLLBACK")
 
 
 def recovery_demo(path: Path):

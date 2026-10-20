@@ -13,6 +13,8 @@ connected through chronological shared-account portfolio replay.
 Broker integration and paper trading are still planned.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
+An offline durable coordinator connects admitted/rejected candidates, modeled
+account reservations and the session-loss latch to that journal atomically.
 This application currently submits no orders.
 
 ## Run locally
@@ -543,3 +545,81 @@ power-loss guarantees. Official design references:
 Next: connect durable candidate/risk decisions, account state and session loss
 latches to a recovery coordinator with reconciliation gates. An actual Alpaca
 paper adapter and real historical baseline evidence remain separate milestones.
+
+## Durable offline account and risk coordination
+
+`DurableCoordinator` now persists chronological session/minute observations,
+accepted **and rejected** candidate decisions, and modeled full-fill account
+commands. Reopening replays those saved commands through the existing
+`AccountLedger`, `size_long` and `DailyLossGuard`, checking saved outcomes.
+This restores modeled cash, fees, allocations, cash/exposure/stop-risk
+reservations, consumed candidates and the fixed daily-loss reference/latch.
+It does not query a broker or enable paper trading.
+
+One outer SQLite transaction commits a command/decision together with any
+intent preparation, research full-fill evidence or local withdrawal. Nested
+journal operations use savepoints, not independent commits. A process stopping
+between intent writing and command completion cannot leave a phantom
+reservation. Each command has a unique caller-supplied request ID: exact
+retries return the saved outcome; changed input under the same ID fails.
+An exact candidate repeated under another request ID returns its historical
+decision without a new reservation. That result is **not dispatch permission**.
+A rejection stays consumed even if account capacity later returns.
+
+Start each actual session at its exchange open, then explicitly advance the
+minute clock/marks before account decisions. Held-symbol marks must be
+available at that exact instant. Future marks fail; missing/stale held marks
+latch unknown equity. A skipped held-inventory minute also latches uncertainty,
+even if the next supplied price is favourable. Cash is known while flat.
+Same-time fills update fees/equity before a later candidate. This is an explicit
+offline command harness, not a replacement for the portfolio replay's event
+scheduling or a stream/checkpoint adapter. Detector bars/ranges and pre-signal
+PAUSED state are not checkpointed; every emitted candidate must reach the
+coordinator durably before an external side effect.
+
+Only the existing **full-fill/full-exit research ledger** is bridged. Synthetic
+fills require a fresh local claim and are labelled `research:`; they are not
+actual broker acknowledgements. `withdrawn` is a terminal local never-claimed
+intent, not broker cancellation. Claimed/unknown/accepted/partial or otherwise
+inconsistent external journal state gates new admissions and modeled lifecycle
+updates without releasing resources. Recovery can latch an interrupted claim
+unknown, but it cannot turn partial broker evidence into a reconstructed
+portfolio. `broker_reconciled` and `paper_execution_enabled` remain false.
+
+New coordinator files use schema 2. The existing journal reader supports
+schemas 1 and 2; a nonempty schema-1 intent history is **not** adopted without
+account evidence. The coordinator stores immutable configuration and executable
+source/dependency identities. Changed configuration/model requires an explicit
+migration, not reinterpretation of old events. Arithmetic uses a fixed
+28-digit Decimal context. Replay is O(history) per command and is not optimised
+for a production daemon. Event outcomes catch inconsistent replay, not all
+manual edits/deletions; no authenticated audit, backup or migration system is
+claimed. Use one authoritative local file and stop old dispatchers before
+lifecycle recovery. Raw journal methods are lower-level building blocks, not a
+way to bypass coordinator admission gates.
+
+Create a new invented loss/restart example (the parent must exist):
+
+```bash
+python -m orb coordinator-demo --db results/coordinator.sqlite
+python -m orb coordinator-inspect --db results/coordinator.sqlite \
+  --account-scope paper:synthetic-coordinator \
+  --daily-loss-fraction 0.001 --fee-per-share 0.01
+```
+
+The demo fills 24 synthetic SPY shares at 100.20, exits at 99 and pays 0.01/share
+per side: modeled cash becomes 9970.72. The ten-unit daily-loss limit stays
+latched across reopening, so QQQ is rejected. This is an arithmetic/recovery
+exercise, not a market result. Inspection requires matching configuration,
+refuses missing files and changes no lifecycle state. The demo refuses existing
+paths. All existing strategy, replay and evaluation contracts remain unchanged.
+
+SQLite savepoint semantics were checked against the official
+[savepoint documentation](https://sqlite.org/lang_savepoint.html) on
+20 October 2026. Tests include abrupt exit before/after the outer commit,
+injected intent/command write failures, two competing connections, missing
+equity gaps, retained aggregate risk and persisted rejected attempts.
+
+Next: partial-fill/exit account reconciliation and a controlled recovery protocol
+before any paper adapter activation. Real-data baseline evaluation remains a
+separate data-access dependency; no live order or performance evidence exists.
