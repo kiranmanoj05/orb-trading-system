@@ -15,6 +15,9 @@ An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled
 account reservations and the session-loss latch to that journal atomically.
+An independent durable reconciliation ledger reconstructs cumulative partial
+entry and exit fills and requires an exact complete broker snapshot before its
+recovery gate can clear.
 This application currently submits no orders.
 
 ## Run locally
@@ -620,6 +623,61 @@ SQLite savepoint semantics were checked against the official
 injected intent/command write failures, two competing connections, missing
 equity gaps, retained aggregate risk and persisted rejected attempts.
 
-Next: partial-fill/exit account reconciliation and a controlled recovery protocol
-before any paper adapter activation. Real-data baseline evaluation remains a
-separate data-access dependency; no live order or performance evidence exists.
+## Partial-fill and exit reconciliation
+
+`ReconciliationLedger` is the next offline recovery boundary. It consumes
+adapter-normalised **cumulative** quantities, notionals and fees for partial or
+terminal entries and exits. Deltas change modeled cash once; filled entry basis
+is allocated proportionally across one or more exit orders. A cancelled partial
+entry releases only its unfilled reservation. A partial exit can be cancelled
+and replaced for the remaining whole shares. Pending and partially filled entry
+orders retain conservative planned stop-risk capacity; a worse observed fill
+can raise that commitment above plan. Exits release commitment only in
+proportion to shares actually closed.
+
+Every command has a stable request ID and is committed with its deterministic
+outcome in a separate account-scoped SQLite file. Exact retries return the saved
+historical result; conflicting reuse fails. Reopening replays all commands with
+a fixed Decimal context and checks outcomes, configuration and source identity.
+Evidence timestamps cannot move backwards. This is deliberately separate from
+the schema-2 coordinator until migration and cross-file atomicity are designed;
+it does not silently reinterpret an existing coordinator journal.
+
+Recovery requires an adapter to supply one complete account snapshot containing
+cash, all SPY/QQQ positions and all open ORB client-order IDs. Exact equality is
+required—there is no cash tolerance or inferred terminal state. Missing or
+unexpected orders, mismatched cash/positions, an incomplete/wrong-account
+snapshot, or any `unknown` lifecycle keeps `broker_reconciled` false. A later
+command invalidates an earlier match until another complete snapshot agrees.
+Even an exact match leaves `paper_execution_enabled` false: reconciliation is
+necessary evidence, not permission to trade.
+
+Run the invented four-share exercise into a new path:
+
+```bash
+python -m orb reconciliation-demo --db results/reconciliation.sqlite
+python -m orb reconciliation-inspect --db results/reconciliation.sqlite \
+  --account-scope paper:synthetic-reconciliation --initial-cash 10000
+```
+
+The demo partially fills two SPY shares at total cost 200.42, cancels the other
+two, then sells one share for net proceeds 100.99. After restart, a complete
+invented snapshot matches cash 9900.57, one SPY share and the still-open exit.
+Realised P&L is 0.78 and retained planned stop risk is 1.22. These are synthetic
+accounting assertions, not strategy performance or broker evidence. No network,
+credentials or order submission are involved.
+
+Current limitations are intentional: the ledger is not yet atomically connected
+to `DurableCoordinator`/`IntentJournal`; it trusts a future adapter's normalized
+snapshot and has no authenticated broker receipt, distributed lease, backup,
+migration, fractional-share, corporate-action, transfer, short, settlement or
+multi-currency model. It tracks carrying-cost gross exposure rather than current
+market value; fresh mark and daily-loss integration remains in the coordinator.
+Each exit order is for currently open whole shares, so entry evidence must be
+terminal before exits are planned. A broker adapter must preserve raw evidence,
+map states conservatively and never turn a missing lookup into rejection.
+
+Next: integrate this reconstruction contract with the coordinator and a
+read-only Alpaca paper account/order/position snapshot adapter, then design a
+separately controlled dispatch path. Real-data baseline evaluation remains a
+data-access dependency; no live order or performance evidence exists.
