@@ -21,6 +21,7 @@ from orb.ingestion import evaluate_bundle, import_capture
 from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
 from orb.journal import IntentJournal, recovery_demo
 from orb.coordinator import CoordinatorConfig, DurableCoordinator, coordinator_demo
+from orb.reconciliation import ReconciliationLedger, reconciliation_demo
 
 
 def demo() -> None:
@@ -62,6 +63,14 @@ def main() -> None:
                           ("risk-fraction", "0.005"), ("max-position-fraction", "0.25"),
                           ("max-gross-fraction", "1"), ("max-total-risk-fraction", "0.01")):
         coordinator_inspect.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
+    reconciliation = commands.add_parser(
+        "reconciliation-demo", help="new synthetic partial-fill/exit recovery exercise; no broker")
+    reconciliation.add_argument("--db", type=Path, required=True)
+    reconciliation_inspect = commands.add_parser(
+        "reconciliation-inspect", help="reconstruct an existing offline partial-fill ledger")
+    reconciliation_inspect.add_argument("--db", type=Path, required=True)
+    reconciliation_inspect.add_argument("--account-scope", required=True)
+    reconciliation_inspect.add_argument("--initial-cash", type=Decimal, required=True)
     ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
     ingest.add_argument("capture", type=Path)
     ingest.add_argument("--out-dir", type=Path, required=True)
@@ -108,6 +117,17 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command in ("reconciliation-demo", "reconciliation-inspect"):
+        try:
+            if args.command == "reconciliation-demo":
+                result = reconciliation_demo(args.db)
+            else:
+                with ReconciliationLedger(args.db, args.account_scope, args.initial_cash, create=False) as ledger:
+                    result = ledger.snapshot()
+            print(json.dumps(result, indent=2))
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            parser.exit(2, f"Reconciliation error: {exc}\n")
+        return
     if args.command in ("coordinator-demo", "coordinator-inspect"):
         try:
             if args.command == "coordinator-demo":
