@@ -18,6 +18,9 @@ account reservations and the session-loss latch to that journal atomically.
 An independent durable reconciliation ledger reconstructs cumulative partial
 entry and exit fills and requires an exact complete broker snapshot before its
 recovery gate can clear.
+A bounded Alpaca paper adapter now performs only fixed account, position and
+open-order GETs, requires two equal normalised passes and feeds that gate while
+leaving execution disabled.
 This application currently submits no orders.
 
 ## Run locally
@@ -674,10 +677,65 @@ migration, fractional-share, corporate-action, transfer, short, settlement or
 multi-currency model. It tracks carrying-cost gross exposure rather than current
 market value; fresh mark and daily-loss integration remains in the coordinator.
 Each exit order is for currently open whole shares, so entry evidence must be
-terminal before exits are planned. A broker adapter must preserve raw evidence,
-map states conservatively and never turn a missing lookup into rejection.
+terminal before exits are planned. A future lifecycle adapter must map statuses
+conservatively and never turn a missing lookup into rejection.
 
-Next: integrate this reconstruction contract with the coordinator and a
-read-only Alpaca paper account/order/position snapshot adapter, then design a
-separately controlled dispatch path. Real-data baseline evaluation remains a
-data-access dependency; no live order or performance evidence exists.
+## Read-only Alpaca paper snapshots
+
+`paper-snapshot` is a deliberately narrow bridge from Alpaca's paper environment
+to `BrokerSnapshot`. It has no POST, PATCH, DELETE, host override or order method.
+It reads credentials only from `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY`, uses
+the fixed `https://paper-api.alpaca.markets` host and rejects redirects. Inspect
+the complete six-request budget without credentials or network:
+
+```bash
+python -m orb paper-snapshot --plan
+```
+
+An actual capture makes two consecutive passes over `/v2/account`,
+`/v2/positions` and all open `/v2/orders`. Orders use the documented maximum
+page size of 500 without a symbol filter; exactly 500 is declared incomplete
+rather than assumed exhaustive. Each response is capped at 1 MB, all six at
+6 MB and each request/read at 10 seconds. There are no retries, so a mixed-time
+capture is not silently prolonged after a failure.
+
+Only cash, whole long SPY/QQQ positions and every open client-order identity are
+normalised. An unexpected symbol, short, fractional position, duplicate/invalid
+identity, blocked/inactive account, pagination boundary or difference between
+passes fails closed. Unsupported positions produce no lossy `BrokerSnapshot`.
+Other incomplete captures carry `complete=false`, so the reconciliation ledger
+can durably record the failed comparison without clearing its gate.
+
+The account UUID is never emitted; its SHA-256-derived paper scope binds the
+local ledger without exposing that provider identifier. Output contains hashes
+of the six raw response byte strings, not bodies or credentials. Those hashes
+support exact local capture comparison but do not authenticate Alpaca. Save the
+redacted JSON externally if it is needed as an operational evidence artifact.
+
+To compare an existing reconciliation database, with no submission side effect:
+
+```bash
+python -m orb paper-reconcile --db results/reconciliation.sqlite \
+  --initial-cash 10000 --request-id recovery-check-1
+```
+
+The existing file must already be bound to the hashed paper account scope and
+matching initial cash. Exact retries use the ledger's existing idempotency rules.
+Even a complete matching capture still reports `paper_execution_enabled=false`
+and `orders_submitted=false`.
+
+Two equal passes are evidence of bounded quiescence, not an atomic provider
+snapshot: an ABA change can theoretically occur between reads. No live provider
+call was made in development; fake HTTP transports validate request policy,
+normalisation and fail-closed behavior. Alpaca's official
+[authentication](https://docs.alpaca.markets/us/v1.1/docs/authentication-1),
+[account](https://docs.alpaca.markets/us/reference/getaccount-1),
+[positions](https://docs.alpaca.markets/us/reference/getallopenpositions) and
+[orders](https://docs.alpaca.markets/us/v1.1/reference/getallorders-1) contracts
+were rechecked on 23 October 2026.
+
+Next: integrate the adapter/reconciliation result with coordinator gating and
+define conservative broker-status/correction recovery. Only after those controls
+and explicit activation should a separately reviewable paper dispatch path be
+considered. Real-data baseline evaluation remains a data-access dependency; no
+live order or performance evidence exists.
