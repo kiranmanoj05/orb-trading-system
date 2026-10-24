@@ -22,6 +22,8 @@ from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
 from orb.journal import IntentJournal, recovery_demo
 from orb.coordinator import CoordinatorConfig, DurableCoordinator, coordinator_demo
 from orb.reconciliation import ReconciliationLedger, reconciliation_demo
+from orb.paper_snapshot import (PaperSnapshotError, capture_paper_snapshot,
+                                snapshot_plan)
 
 
 def demo() -> None:
@@ -71,6 +73,15 @@ def main() -> None:
     reconciliation_inspect.add_argument("--db", type=Path, required=True)
     reconciliation_inspect.add_argument("--account-scope", required=True)
     reconciliation_inspect.add_argument("--initial-cash", type=Decimal, required=True)
+    paper_snapshot = commands.add_parser(
+        "paper-snapshot", help="bounded read-only Alpaca paper account snapshot; never submits")
+    paper_snapshot.add_argument(
+        "--plan", action="store_true", help="show fixed GET requests without credentials or network")
+    paper_reconcile = commands.add_parser(
+        "paper-reconcile", help="capture a read-only paper snapshot and compare an existing ledger")
+    paper_reconcile.add_argument("--db", type=Path, required=True)
+    paper_reconcile.add_argument("--initial-cash", type=Decimal, required=True)
+    paper_reconcile.add_argument("--request-id", required=True)
     ingest = commands.add_parser("import-alpaca", help="validate saved response pages and archive a new bundle")
     ingest.add_argument("capture", type=Path)
     ingest.add_argument("--out-dir", type=Path, required=True)
@@ -117,6 +128,25 @@ def main() -> None:
                           ("slippage-bps", "0"), ("fee-per-share", "0")):
             portfolio.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
     args = parser.parse_args()
+    if args.command in ("paper-snapshot", "paper-reconcile"):
+        try:
+            capture = None if args.command == "paper-snapshot" and args.plan else capture_paper_snapshot()
+            if capture is None:
+                result = snapshot_plan()
+            elif args.command == "paper-snapshot":
+                result = capture.payload()
+            else:
+                if capture.snapshot is None:
+                    raise PaperSnapshotError(
+                        "unsupported positions prevent safe ledger normalisation; no reconciliation was written")
+                with ReconciliationLedger(args.db, capture.snapshot.account_scope,
+                                          args.initial_cash, create=False) as ledger:
+                    comparison = ledger.reconcile(args.request_id, capture.snapshot)
+                result = {"capture": capture.payload(), "reconciliation": comparison}
+            print(json.dumps(result, indent=2))
+        except (ValueError, OSError, sqlite3.Error) as exc:
+            parser.exit(2, f"Paper snapshot error: {exc}\n")
+        return
     if args.command in ("reconciliation-demo", "reconciliation-inspect"):
         try:
             if args.command == "reconciliation-demo":
