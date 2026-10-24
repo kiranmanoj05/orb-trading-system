@@ -739,3 +739,81 @@ define conservative broker-status/correction recovery. Only after those controls
 and explicit activation should a separately reviewable paper dispatch path be
 considered. Real-data baseline evaluation remains a data-access dependency; no
 live order or performance evidence exists.
+
+## Durable coordinator snapshot gate
+
+The offline coordinator now accepts the same `BrokerSnapshot` contract as the
+partial-fill ledger and accepts `PaperSnapshotCapture` directly. Comparisons,
+failed captures and fixed recovery hold codes are recorded in the coordinator's
+own SQLite command transaction. They survive restart without rewriting cash,
+reservations, inventory, risk or the session-loss latch. Try the credential-free,
+network-free invented demonstration with a **new database path**:
+
+```bash
+python -m orb coordinator-gate-demo --db results/coordinator-gate.sqlite
+python -m orb coordinator-inspect --db results/coordinator-gate.sqlite \
+  --account-scope paper:synthetic-gate
+```
+
+The demo first retains a cash mismatch through restart, then obtains an exact
+match, then proves that a terminal-correction hold still blocks a later matching
+snapshot. It reports `orders_submitted=false` throughout. It is not a trading
+performance example.
+
+`observe_broker_snapshot(request_id, snapshot, at=minute)` checks exact account
+scope, cash, whole-share positions and absence of unexpected open orders. A local
+prepared intent is unsent, so it must not already appear as a broker open order.
+Snapshots must be no more than 60 seconds old and never later than the explicit
+completed-minute decision time. `observe_paper_capture` also bounds the start of
+the entire capture window and retains incompleteness. This means the capture
+must finish **before** the decision minute; a capture finishing afterwards cannot
+be used to inform that earlier decision. This remains an explicit-clock offline
+harness, without a live polling/scheduling loop.
+
+`check_paper_account(request_id, at=minute)` uses the existing GET-only adapter
+outside the SQLite writer transaction and then commits the result. It first
+commits `capture_in_progress`, so a process exit during the read leaves the gate
+blocked. Missing keys,
+transport failures and adapter failures record `capture_unavailable`, retaining
+no exception text. Exact request retries return the saved historical result
+without another network call. Such a result is not current permission: inspect
+`snapshot()` for the current gate. A network read made after the supplied minute
+correctly remains blocked as future evidence. An event-loop integration should
+capture first, advance the clock and marks to a later completed minute, then
+call `observe_paper_capture` with the retained capture.
+
+Once an observation or capture failure has enrolled the broker gate, every new
+minute, session, admission or modeled account command makes the comparison stale.
+The gate also fingerprints current journal rows, so a claim or external lifecycle
+update through another connection invalidates a formerly matching comparison.
+A stale or mismatched gate rejects new candidates and modeled account operations
+without freeing resources. Rejections remain consumed for the symbol/session.
+No observation is required for the existing standalone synthetic research path;
+that path continues to report `broker_reconciled=false`.
+
+`hold_recovery` records one of `order_status_unknown`, `terminal_correction`,
+`fill_bust` or `external_activity`. These holds persist across sessions and cannot
+be cleared by a cash/position snapshot or by retrying an old successful request.
+There is intentionally no clear/force/repair method. The caller must retain a
+hold before attempting any future correction workflow; this increment does not
+map raw broker statuses, detect provider corrections or change terminal fills.
+A separately reviewed migration/evidence-repair protocol is required.
+
+This is a conservative comparison gate on the existing **full-fill research
+model**, not atomic integration of the separate partial-fill ledger. Claimed,
+partial or unknown external journal state stays blocked even if balances happen
+to match. Synthetic fill history is explicitly labelled `synthetic_lifecycle`
+and cannot be blessed as actual broker truth. A matching partial-ledger result
+cannot authorise the coordinator. `paper_execution_enabled` is always false.
+
+The executable model fingerprint now includes comparison and adapter code. Old
+coordinator databases intentionally refuse reopening under changed rules;
+preserve them and use their original revision to inspect them. There is no
+in-place migration or historical reinterpretation. Do not delete state or edit
+its fingerprint to bypass that refusal. The unchanged standalone reconciliation
+ledger remains separate.
+
+Next: a versioned, atomic integration of partial-fill accounting with admission,
+intent and daily-loss state, including a reviewed correction-evidence protocol.
+Real historical evaluation remains necessary before assessing strategy returns;
+news/economic context remains deferred until that baseline exists.

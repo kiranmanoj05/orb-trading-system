@@ -4,6 +4,7 @@ Replay validated commands through the existing account and loss models. The
 command, decision and intent effect commit together in one local transaction.
 Only synthetic full-fill accounting is supported; external/partial evidence
 gates further admissions instead of being forced into this simpler model.
+Read-only snapshots can gate this model but never import broker fills.
 """
 
 from dataclasses import asdict, dataclass
@@ -13,6 +14,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from orb.broker_gate import CAPTURE_FAILURES, RECOVERY_HOLDS, compare_snapshot
+from orb.reconciliation import BrokerSnapshot
 from orb.account import AccountLedger
 from orb.daily_loss import DailyLossGuard
 from orb.domain import BreakoutSignal
@@ -61,7 +64,8 @@ def _model_id():
     from importlib.metadata import version
     root = Path(__file__).parent
     names = ("account.py", "risk.py", "daily_loss.py", "session.py", "breakout.py",
-             "domain.py", "journal.py", "coordinator.py")
+             "domain.py", "journal.py", "coordinator.py", "broker_gate.py",
+             "reconciliation.py", "paper_snapshot.py", "acquisition.py")
     h = sha256()
     for name in names:
         h.update(name.encode() + b"\0" + (root / name).read_bytes())
@@ -77,6 +81,9 @@ class _State:
         self.marks = {}
         self.at = self.tick_at = None
         self.attempts = {}
+        self.broker_observation = None
+        self.broker_current = False
+        self.recovery_holds = []
 
 
 def _marks(evidence, at):
@@ -108,8 +115,9 @@ class DurableCoordinator:
     """One authoritative local file; open one connection per worker.
 
     Event replay is deliberately simple and O(history) per command. Model and
-    configuration identities are fixed. No live submission permission, broker
-    reconciliation, partial-fill account model or detector-bar checkpoint exists.
+    configuration identities are fixed. Bounded snapshot comparison is supported;
+    external partial fills cannot clear its gate. No submission permission,
+    partial-fill account import or detector-bar checkpoint exists.
     """
 
     def __init__(self, path: Path, account_scope: str, config: CoordinatorConfig | None = None, *, create=True):
@@ -157,7 +165,26 @@ class DurableCoordinator:
                     raise JournalError("saved decision disagrees with deterministic model replay")
             return state
 
+    def _journal_digest(self):
+        rows = [dict(r) for r in self._db.execute("SELECT * FROM intents ORDER BY signal_id")]
+        return sha256(_json(rows).encode()).hexdigest()
+
+    def _gate_reasons(self, state):
+        reasons = ["external_lifecycle_unsupported"] if self._journal_gate(state) else []
+        reasons.extend(state.recovery_holds)
+        observation = state.broker_observation
+        if observation is not None:
+            reasons.extend(observation["reasons"])
+            if not state.broker_current:
+                reasons.append("snapshot_stale")
+            if observation["journal_digest"] != self._journal_digest():
+                reasons.append("journal_changed")
+        return list(dict.fromkeys(reasons))
+
     def _gate(self, state):
+        return bool(self._gate_reasons(state))
+
+    def _journal_gate(self, state):
         rows = {r["signal_id"]: r for r in self._db.execute("SELECT * FROM intents")}
         if set(rows) != {a.order_id for a in state.account.allocations}:
             return True
@@ -182,6 +209,7 @@ class DurableCoordinator:
         if state.at is not None and at < state.at:
             raise JournalError("coordinator commands must be chronological")
         if op == "session":
+            state.broker_current = False
             schedule = exchange_session(at.date())
             if schedule is None or at != schedule.opens_at or (state.guard and schedule.day <= state.guard.session.day):
                 raise JournalError("start one actual exchange session at its fixed open")
@@ -192,6 +220,7 @@ class DurableCoordinator:
         if state.guard is None or not state.guard.session.opens_at <= at <= state.guard.session.closes_at:
             raise JournalError("command needs its current exchange session")
         if op == "tick":
+            state.broker_current = False
             if at <= state.tick_at:
                 raise JournalError("a minute observation is already consumed; retry its original request ID")
             # Do not heal an unobserved held-equity gap with a favourable later mark.
@@ -204,6 +233,23 @@ class DurableCoordinator:
         if at != state.tick_at:
             raise JournalError("advance the minute clock and marks before account decisions")
         state.at = at
+        if op in ("broker_snapshot", "broker_unavailable"):
+            reasons = (compare_snapshot(state.account, self.journal.account_scope, command["snapshot"],
+                                        at, command["journal_blocked"])
+                       if op == "broker_snapshot" else [command["reason"]])
+            state.broker_observation = {"snapshot": command.get("snapshot"), "at": _stamp(at),
+                                        "journal_digest": command["journal_digest"], "reasons": reasons}
+            state.broker_current = True
+            return {"comparison": state.broker_observation, "recovery_holds": state.recovery_holds.copy(),
+                    "broker_reconciled": not reasons and not state.recovery_holds,
+                    "paper_execution_enabled": False, "orders_submitted": False}
+        if op == "recovery_hold":
+            if command["reason"] not in state.recovery_holds:
+                state.recovery_holds.append(command["reason"])
+            state.broker_current = False
+            return {"recovery_holds": state.recovery_holds.copy(), "broker_reconciled": False,
+                    "paper_execution_enabled": False, "orders_submitted": False}
+        state.broker_current = False
         if op == "candidate":
             signal = _signal(command["signal"])
             base = EntryIntent.from_signal(signal, 1, self.config_id)
@@ -277,13 +323,17 @@ class DurableCoordinator:
             old = self._db.execute("SELECT command,outcome FROM coordinator_events WHERE request_id=?", (request_id,)).fetchone()
             if old:
                 saved = json.loads(old["command"])
-                saved.pop("reconciliation_blocked", None)
+                for generated in ("reconciliation_blocked", "journal_blocked", "journal_digest"):
+                    saved.pop(generated, None)
                 if _json(saved) != _json(command):
                     raise JournalError("conflicting duplicate coordinator request")
                 return json.loads(old["outcome"])
             state = self._restore()
             gated = self._gate(state)
-            if command["op"] == "candidate":
+            if command["op"] in ("broker_snapshot", "broker_unavailable"):
+                command = {**command, "journal_blocked": self._journal_gate(state),
+                           "journal_digest": self._journal_digest()}
+            elif command["op"] == "candidate":
                 command = {**command, "reconciliation_blocked": gated}
             elif gated and command["op"] in ("fill", "cancel", "close", "unresolved"):
                 raise JournalError("external journal state requires reconciliation; account resources retained")
@@ -325,6 +375,73 @@ class DurableCoordinator:
             raise JournalError("this account operation does not take a price")
         return self._execute(request_id, command)
 
+    def observe_broker_snapshot(self, request_id, snapshot: BrokerSnapshot, *, at: datetime):
+        if not isinstance(snapshot, BrokerSnapshot):
+            raise JournalError("expected validated BrokerSnapshot evidence")
+        return self._execute(request_id, {"op": "broker_snapshot", "at": _stamp(at),
+                                         "snapshot": snapshot.payload()})
+
+    def record_capture_failure(self, request_id, reason, *, at: datetime):
+        if reason not in CAPTURE_FAILURES:
+            raise JournalError("unsupported capture failure reason")
+        return self._execute(request_id, {"op": "broker_unavailable", "at": _stamp(at), "reason": reason})
+
+    def hold_recovery(self, request_id, reason, *, at: datetime):
+        if reason not in RECOVERY_HOLDS:
+            raise JournalError("unsupported recovery hold reason")
+        return self._execute(request_id, {"op": "recovery_hold", "at": _stamp(at), "reason": reason})
+
+    def observe_paper_capture(self, request_id, capture, *, at: datetime):
+        from orb.paper_snapshot import PaperSnapshotCapture
+        if not isinstance(capture, PaperSnapshotCapture):
+            raise JournalError("expected read-only paper capture")
+        _stamp(capture.observed_from)
+        _stamp(capture.observed_to)
+        if capture.observed_from > capture.observed_to:
+            raise JournalError("paper capture clock moved backwards")
+        if capture.snapshot is None:
+            return self.record_capture_failure(request_id, "unsupported_positions", at=at)
+        # The entire capture must have completed by the decision time. Adapter
+        # completeness is retained, including failures beyond normalised fields.
+        payload = capture.snapshot.payload()
+        if capture.snapshot.as_of != capture.observed_to:
+            raise JournalError("paper capture end disagrees with snapshot time")
+        snapshot = BrokerSnapshot(capture.snapshot.account_scope, capture.observed_to,
+            capture.snapshot.cash, capture.snapshot.positions, capture.snapshot.open_client_order_ids,
+            payload["complete"] and not capture.reasons
+            and timedelta(0) <= at - capture.observed_from <= timedelta(seconds=60))
+        return self.observe_broker_snapshot(request_id, snapshot, at=at)
+
+    def check_paper_account(self, request_id, *, at: datetime):
+        """Capture outside the write lock, then atomically record the gate result.
+
+        Caller advances the explicit minute clock first. Capture must finish no
+        later than that decision time; future/old evidence remains blocked.
+        Exact request retries return historical evidence without another GET.
+        """
+        from orb.acquisition import AcquisitionError
+        from orb.paper_snapshot import PaperSnapshotError, capture_paper_snapshot
+        _token(request_id)
+        stamp = _stamp(at)
+        with self.journal._transaction():
+            old = self._db.execute("SELECT command,outcome FROM coordinator_events WHERE request_id=?",
+                                   (request_id,)).fetchone()
+            if old:
+                command = json.loads(old["command"])
+                if command["op"] not in ("broker_snapshot", "broker_unavailable") or command["at"] != stamp:
+                    raise JournalError("conflicting duplicate coordinator request")
+                return json.loads(old["outcome"])
+        # Commit the uncertain boundary before network I/O. A process exit or
+        # malformed capture cannot leave an earlier green comparison active.
+        begin_id = "capture-start:" + sha256(request_id.encode()).hexdigest()
+        self.record_capture_failure(begin_id, "capture_in_progress", at=at)
+        try:
+            capture = capture_paper_snapshot()
+        except (AcquisitionError, PaperSnapshotError, OSError):
+            # No exception strings, response bodies or credentials are persisted.
+            return self.record_capture_failure(request_id, "capture_unavailable", at=at)
+        return self.observe_paper_capture(request_id, capture, at=at)
+
     def snapshot(self):
         with localcontext(Context(prec=28)), self.journal._transaction():
             state = self._restore()
@@ -333,7 +450,12 @@ class DurableCoordinator:
                 "model_id": self.model_id,
                 "daily_loss": state.guard.to_dict() if state.guard else None, "at": state.at,
                 "attempts": [{"session": k[0], "symbol": k[1], "outcome": v[1]} for k,v in sorted(state.attempts.items())],
-                "reconciliation_required": self._gate(state), "broker_reconciled": False,
+                "reconciliation_required": self._gate(state),
+                "reconciliation_reasons": self._gate_reasons(state),
+                "broker_observation": state.broker_observation,
+                "recovery_holds": state.recovery_holds,
+                "broker_gate_enrolled": state.broker_observation is not None,
+                "broker_reconciled": state.broker_observation is not None and not self._gate(state),
                 "paper_execution_enabled": False, "modeled_account_restored": True,
                 "events": self._db.execute("SELECT COUNT(*) FROM coordinator_events").fetchone()[0]})
 
@@ -376,3 +498,26 @@ def coordinator_demo(path: Path):
         c.admit("qqq", candidate("QQQ", later))
         return {"synthetic": True, "orders_submitted": False,
                 "restored_identically": restored, "state": c.snapshot()}
+
+
+def coordinator_gate_demo(path: Path):
+    """Invented broker mismatch, restart, repair and persistent correction hold."""
+    with Path(path).open("xb"):
+        pass
+    at = datetime(2026, 10, 9, 13, 46, tzinfo=timezone.utc)
+    scope = "paper:synthetic-gate"
+    good = BrokerSnapshot(scope, at - timedelta(seconds=10), Decimal("10000"), (), (), True)
+    bad = BrokerSnapshot(scope, good.as_of, Decimal("9999"), (), (), True)
+    with DurableCoordinator(path, scope) as c:
+        c.start_session("session", at.date())
+        c.tick("minute", at)
+        mismatch = c.observe_broker_snapshot("mismatch", bad, at=at)
+        before = c.snapshot()
+    with DurableCoordinator(path, scope, create=False) as c:
+        restored = before == c.snapshot()
+        matching = c.observe_broker_snapshot("matching", good, at=at)
+        c.hold_recovery("correction", "terminal_correction", at=at)
+        after_hold = c.observe_broker_snapshot("still-held", good, at=at)
+        return {"synthetic": True, "orders_submitted": False, "restored_identically": restored,
+                "mismatch": mismatch, "matching": matching, "after_correction_hold": after_hold,
+                "state": c.snapshot()}
