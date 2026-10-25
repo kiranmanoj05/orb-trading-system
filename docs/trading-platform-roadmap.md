@@ -46,6 +46,30 @@ ECC is MIT licensed (Copyright 2026 Affaan Mustafa). This brief references and
 adapts ideas rather than copying its Swift code. If later implementation vendors
 code or substantial text, retain its required copyright and MIT notice.
 
+## Standing product requirement: presets and settings
+
+Confirmed by the user on 25 October 2026: presets and configurable strategy/risk
+parameters are mandatory acceptance criteria for the platform. Keep them in
+every development handoff and progress report. The platform is not complete
+with a read-only dashboard alone.
+
+Provide named preset selection, editable supported parameters, validation,
+save/duplicate/reset, draft versus applied state and immutable per-run versions.
+Expose schedule, opening range/entry window, supported stop and target policies,
+target R, per-trade risk, entry/concurrency caps, account exposure/aggregate risk,
+daily-loss limits and execution-cost assumptions as their engine support lands.
+Use one configuration contract across CLI/API/UI; never build settings that
+silently do nothing. Preserve the fixed reference preset and make unsupported
+options explicit. Changing a setting is a research variant, not evidence of
+better returns. Validate economically through the recorded evaluation protocol.
+
+Every development update must state what changed, checks actually completed,
+progress on preset/settings acceptance, next increment and essential user
+action (or none). Continue independent implementation autonomously. When a
+credential, inaccessible artifact, decision or budget is essential, notify the
+user promptly with the smallest concrete action; pause only dependent work and
+avoid repeated blocker notifications. Existing authorisation remains in effect.
+
 ## First usable dashboard
 
 - Overview: distinguish historical replay, paper observation and later paper
