@@ -13,6 +13,39 @@ The existing fixed SPY/QQQ long-only ORB remains the reproducible reference.
 Configurable variants are new versioned experiments. Do not change baseline
 results retroactively or present unsupported strategies as available.
 
+## Dashboard visual direction
+
+Use the user-selected ECC liquid-glass-design skill as a visual reference:
+https://github.com/affaan-m/ECC/blob/main/skills/liquid-glass-design/SKILL.md
+Reviewed blob: 495dd01a63bb523ad9b6d02f76fae2c4f2ab29e8, 25 October 2026.
+This skill is written for iOS 26 SwiftUI/UIKit/WidgetKit, not React. Adapt its
+principles to the web; do not treat Swift APIs as browser dependencies or claim
+CSS reproduces the native Apple material exactly.
+
+- Default proposal: dark graphite/navy foundation, restrained cool accent,
+  rounded translucent navigation, toolbar and profile-selector surfaces.
+- Keep candles, price tables, risk values and decision logs on solid or
+  sufficiently opaque panels. Readability takes priority over visual effects.
+- Glass is a navigation/control layer, not a treatment for every card. Avoid
+  nested blur and excessive backdrop filters; restrict and measure blur areas.
+- Use clear typography and aligned tabular numbers; show units, timestamps,
+  positive/negative signs and status text. Never encode profit/loss, execution
+  mode, stale data or risk limits with colour alone.
+- Hover/press feedback only on interactive controls. No morphing position for
+  active trading actions, blinking P&L or motion that disrupts chart inspection.
+- Honour reduced-motion preferences and provide an explicit reduce-transparency
+  setting. Supply opaque fallbacks when backdrop filtering is unsupported.
+- Check keyboard focus, zoom/reflow, responsive layouts and text contrast
+  (minimum 4.5:1 for normal text, 3:1 for large text) against actual backgrounds.
+- Paper/historical mode and execution capability remain visible at all times.
+  Destructive paper controls use distinct labels, not decorative glass icons.
+- Build the first slice in React/TypeScript with reusable design tokens and
+  components; chart rendering and backend/data contracts remain independent.
+
+ECC is MIT licensed (Copyright 2026 Affaan Mustafa). This brief references and
+adapts ideas rather than copying its Swift code. If later implementation vendors
+code or substantial text, retain its required copyright and MIT notice.
+
 ## First usable dashboard
 
 - Overview: distinguish historical replay, paper observation and later paper
