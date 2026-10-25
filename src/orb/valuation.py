@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from orb.session import exchange_session
 from orb.strategy import NEW_YORK
+from orb.outcomes import outcomes_complete
 
 
 def market_valuation(bars, portfolio, coverage):
@@ -68,9 +69,8 @@ def market_valuation(bars, portfolio, coverage):
                         'unrealized_net_pnl': str(unrealized) if not missing else None})
     valid = bool(samples) and all(s['equity'] is not None for s in samples)
     scope_complete = bool(coverage) and all(c['state'] == 'complete' for c in coverage)
-    outcomes_complete = all(t['status'] not in ('unresolved', 'unfilled')
-                            for t in portfolio['trades'])
-    eligible = valid and scope_complete and outcomes_complete
+    known_outcomes = outcomes_complete(portfolio['trades'])
+    eligible = valid and scope_complete and known_outcomes
     peak = initial
     drawdown = Decimal('0')
     if eligible:
@@ -78,10 +78,13 @@ def market_valuation(bars, portfolio, coverage):
             equity = Decimal(sample['equity'])
             peak = max(peak, equity)
             drawdown = max(drawdown, (peak - equity) / peak)
-    return {'model_version': 'completed-minute-valuation-v1',
+    return {'model_version': 'completed-minute-valuation-v2',
             'affects_sizing': False, 'samples': samples,
             'missing_mark_samples': sum(s['equity'] is None for s in samples),
             'metrics_eligible': eligible,
+            'coverage_complete': scope_complete,
+            'outcomes_complete': known_outcomes,
+            'marks_complete': valid,
             'total_return': str((Decimal(samples[-1]['equity']) - initial) / initial) if eligible else None,
             'max_drawdown': str(drawdown) if eligible else None,
             'limitations': ['Minute samples cannot reveal intraminute drawdown.',
