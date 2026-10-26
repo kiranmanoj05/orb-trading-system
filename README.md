@@ -39,14 +39,45 @@ python -m orb simulate fixtures/orb_execution_sample.csv --output results/simula
 python -m orb account-demo
 ```
 
+## Local dashboard
+
+The React/TypeScript historical viewer is backed by a loopback-only FastAPI
+service and the existing Python evaluator. It displays candle/range/fill/exit
+evidence, decision reasons, immutable applied settings, cash/commitments,
+completeness and daily-loss gates. It is separate from the hosted synthetic
+design prototype. No Alpaca keys are required for local imports or examples.
+
+From the repository root (Python 3.11+ and Node 22+):
+
+```bash
+python -m pip install -e '.[dev,dashboard]'
+npm --prefix web ci
+npm --prefix web run build
+python -m orb.dashboard_api --examples
+```
+
+Open **http://127.0.0.1:8765**. Omit `--examples` to start with an empty session.
+Use **Import run** for canonical CSV, `capture.json`, or all three original
+bundle files (`capture.json`, `bars.csv`, `manifest.json`). Pair a saved v4/v5
+evaluation JSON to retain its settings, declared scope and original identity.
+The service verifies source/configuration identities and recomputes results
+with the current engine; it never displays uploaded metrics as verified results.
+Missing-data gates remain intact. See [local dashboard details](docs/local-dashboard.md).
+
+Versioned editable presets, durable run/job storage, paper observation and news
+remain upcoming work. Applied settings are currently read only; no dummy
+controls imply unsupported strategy or risk behaviour. Imports last this server
+session only. Export dashboard evidence before restarting when needed.
+
 ## Dashboard contract and synthetic examples
 
 The first read-only dashboard data contract is available as
 `orb.dashboard.build_dashboard_run(bars, **evaluation_settings)`. It calls the
 same evaluator as the research CLI and attaches canonical candles with explicit
 availability times, complete opening ranges, signal/fill distinctions, decision
-reasons and linked account events. This is a backend contract, not a running UI.
-It does not accept arbitrary saved-report JSON yet or expose a preset editor.
+reasons and linked account events. The local API/viewer uses this contract.
+The import adapter validates original source plus optional saved-report settings;
+there is no editable preset system yet.
 
 Generate three reproducible acceptance runs without credentials:
 
