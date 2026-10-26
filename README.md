@@ -39,7 +39,40 @@ python -m orb simulate fixtures/orb_execution_sample.csv --output results/simula
 python -m orb account-demo
 ```
 
-## Baseline
+## Dashboard contract and synthetic examples
+
+The first read-only dashboard data contract is available as
+`orb.dashboard.build_dashboard_run(bars, **evaluation_settings)`. It calls the
+same evaluator as the research CLI and attaches canonical candles with explicit
+availability times, complete opening ranges, signal/fill distinctions, decision
+reasons and linked account events. This is a backend contract, not a running UI.
+It does not accept arbitrary saved-report JSON yet or expose a preset editor.
+
+Generate three reproducible acceptance runs without credentials:
+
+```bash
+python -m orb.dashboard_fixtures --out-dir results/dashboard-examples
+```
+
+The new directory contains JSON and Markdown for a complete closed trade, a
+known skipped entry and a missing-entry case. All prices are **invented**; these
+are software examples, not Alpaca results. Reruns need a new output directory.
+Historical review data is labelled `historical_simulation`; it is not paper
+activity, a live feed or input for causal trading decisions.
+
+Evaluation schema `orb-evaluation-v5` separates coverage, known outcomes and
+valuation marks. Known skipped entries remain `unfilled` in the trade ledger
+but can be complete account outcomes; they are never counted as closed flat
+trades. Missing entry data, unresolved positions and unknown new outcome reasons
+still suppress aggregate metrics. JSON returns/drawdowns/win rates are decimal
+fractions; Markdown reports percentages and explicit cost units. Old reports
+remain snapshots: regenerate from source data to obtain the new semantics.
+
+Versioned editable/saved presets remain a mandatory next platform milestone.
+This contract fingerprints applied evaluator inputs and reference rules, with
+no claim that preset selection, draft editing or durable counters exist yet.
+
+## Baseline strategy
 
 SPY/QQQ, long only, completed one-minute bars, range [09:30, 09:45)
 America/New_York. Signals use a close strictly above the frozen range high,

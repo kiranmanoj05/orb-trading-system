@@ -202,8 +202,8 @@ def test_daily_fraction_is_fingerprinted_and_reported():
     b = evaluate(path(), daily_loss_fraction=D('.01'))
     assert a['evaluation_id'] != b['evaluation_id']
     assert b['manifest']['config']['daily_loss_fraction'] == '0.01'
-    assert b['manifest']['schema_version'] == 'orb-evaluation-v4'
-    assert 'Daily-loss fraction: 0.01' in render_report(b)
+    assert b['manifest']['schema_version'] == 'orb-evaluation-v5'
+    assert 'Daily-loss entry-block threshold: 1%' in render_report(b)
 
 
 def test_cli_daily_loss_fraction_and_invalid_value():

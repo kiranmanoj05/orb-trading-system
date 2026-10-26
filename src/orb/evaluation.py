@@ -18,6 +18,7 @@ from orb.risk import RiskLimits
 from orb.session import exchange_session
 from orb.strategy import NEW_YORK
 from orb.valuation import market_valuation
+from orb.outcomes import outcome_class
 
 
 def _decimal(value: Decimal) -> str:
@@ -117,11 +118,9 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     if realised != Decimal(result["account"]["realized_pnl"]):
         raise ValueError("closed trade P&L disagrees with account ledger")
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
-    complete = bool(coverage) and not incomplete_sessions and not (
-        counts["unresolved"] or counts["unfilled"])
     valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v4",
+        "schema_version": "orb-evaluation-v5",
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -146,7 +145,12 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                                      "korean-lunar-calendar", "toolz", "python-dateutil")}},
     }
     summary = {
-        "complete": complete, "coverage_scope": "regular-session minutes within declared dates",
+        "complete": valuation["metrics_eligible"],
+        "coverage_complete": valuation["coverage_complete"],
+        "outcomes_complete": valuation["outcomes_complete"],
+        "marks_complete": valuation["marks_complete"],
+        "outcome_class_counts": dict(sorted(Counter(outcome_class(t) for t in trades).items())),
+        "coverage_scope": "regular-session minutes within declared dates",
         "expected_symbol_sessions": len(coverage),
         "incomplete_symbol_sessions": incomplete_sessions,
         "candidate_count": len(trades), "trade_status_counts": counts,
@@ -177,6 +181,10 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
             "summary": summary, "coverage": coverage, "portfolio": result, "valuation": valuation}
 
 
+def _percent(value) -> str:
+    return f"{_decimal(Decimal(value) * 100)}%" if value is not None else "unavailable"
+
+
 def render_report(result: dict) -> str:
     """Human-readable companion; the full JSON retains all evidence and paths."""
     s = result["summary"]
@@ -187,18 +195,26 @@ def render_report(result: dict) -> str:
              f"Dataset SHA-256: {m['dataset']['sha256']}",
              f"Engine SHA-256: {m['engine']['source_sha256']}", "",
              f"Complete within declared coverage: {s['complete']}",
+             f"Coverage complete: {s.get('coverage_complete', 'not recorded')}",
+             f"Outcomes complete: {s.get('outcomes_complete', 'not recorded')}",
+             f"Valuation marks complete: {s.get('marks_complete', 'not recorded')}",
              f"Incomplete symbol/sessions: {s['incomplete_symbol_sessions']} / {s['expected_symbol_sessions']}", "",
              "| Candidate status | Count |", "| --- | ---: |"]
     lines += [f"| {state} | {count} |" for state, count in s["trade_status_counts"].items()]
-    lines += ["", f"Closed-trade net P&L only: {s['closed_subset']['net_pnl']}",
-              f"Closed-trade win fraction: {s['closed_subset']['win_fraction']}",
+    lines += ["", f"Closed-trade net P&L only (USD): {s['closed_subset']['net_pnl']}",
+              f"Closed-trade win rate: {_percent(s['closed_subset']['win_fraction'])}"
+              + (" (undefined: no closed trades)" if s['closed_subset']['win_fraction'] is None else ""),
               f"Ambiguous closed exits: {s['ambiguous_closed_exits']}",
-              f"Total return: {s['total_return']} (not calculated when incomplete)",
-              f"Minute-sampled maximum drawdown: {s['max_drawdown']}",
+              f"Total return: {_percent(s['total_return'])} (not calculated when incomplete)",
+              f"Minute-sampled maximum drawdown: {_percent(s['max_drawdown'])}",
               f"Missing-mark samples: {result['valuation']['missing_mark_samples']}",
               "Admission uses fresh marked snapshots; the series shows post-event valuation.",
-              f"Aggregate planned-risk fraction: {m['config']['max_total_risk_fraction']}", "",
-              f"Daily-loss fraction: {m['config']['daily_loss_fraction']}",
+              f"Aggregate planned-risk limit: {_percent(m['config']['max_total_risk_fraction'])}", "",
+              f"Daily-loss entry-block threshold: {_percent(m['config']['daily_loss_fraction'])}",
+              f"Market-side slippage assumption: {m['config']['slippage_bps']} bps",
+              f"Fee assumption: {m['config']['fee_per_share']} USD per share per side",
+              "JSON return/drawdown/win values are fractions; Markdown displays percentages.",
+              "Zero-cost scenarios are diagnostic; they do not establish executable performance.",
               f"Blocked session reasons: {s['daily_loss_block_reasons']}", "",
               "## Coverage", "", "| Session | Symbol | State | Missing / expected minutes |",
               "| --- | --- | --- | ---: |"]
