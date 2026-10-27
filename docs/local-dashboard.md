@@ -77,7 +77,8 @@ with a matching edited hash is still merely a declaration, not authentic evidenc
 The returned `import_context` distinguishes original report identity/schema from
 the current evaluation ID and explains recomputation. v4 known skips can acquire
 corrected v5 metrics without rewriting the original report. Exact applied
-settings and their fingerprint are exposed read only. Explicit saved date bounds
+settings and their fingerprint remain immutable; the separate risk/cost editor
+creates saved versions and new evaluations (see research-presets.md). Explicit saved date bounds
 are retained, including wholly absent sessions. Without a saved report, coverage
 uses observed New York dates only, matching the evaluator: omitted dates beyond
 that scope are unknown. Capture request metadata remains visible but does not
@@ -123,9 +124,10 @@ for that independent research step.
 
 ## Next mandatory acceptance items
 
-- One validated, versioned configuration contract across CLI/API/UI; working
-  preset selection, edit/save/duplicate/reset, draft versus applied state and
-  immutable per-run versions. Do not call this platform complete without them.
+- Supported risk/cost selection, edit/save/duplicate/reset, draft/applied states
+  and immutable per-run versions are implemented (research-presets.md).
+  Complete the remaining strategy/schedule controls and durable caps before
+  calling the broader preset acceptance criteria complete.
 - NY weekday variants and supported target settings, with the reference fixed;
   durable entry/concurrency counters and pending/partial-fill semantics before
   exposing those controls. Schedule gates entries, never position management.
@@ -136,3 +138,22 @@ for that independent research step.
 
 These follow the agreed platform roadmap (PR #19) and research audit. No new
 user action is required to continue configuration and interface engineering.
+
+
+## Preset increment (27 October 2026)
+
+The CLI now configures a durable preset database by default. API tests without
+a preset_db explicitly use temporary memory state; a configured local file
+persists versions. The settings editor/API/CLI share ResearchSettings, including
+exact decimal strings, schema and range validation, and rejection of unknown
+controls. Applying a version creates a separate evaluator-backed profile run.
+Preset metadata and applied values are frozen together; source/bundle identity
+and explicit coverage scope remain visible. Duplicate identical run identities
+retain their first stored snapshot. This is separate from durable job/account
+state: imported and generated runs remain session-local.
+
+Run the additional preset browser workflow with:
+
+```bash
+npm --prefix web run test:presets
+```

@@ -798,3 +798,54 @@ svg {
     font-size: 11px;
   }
 }
+.preset-panel > label {
+  max-width: 480px;
+  margin: 20px 0;
+}
+.preset-fields {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 22px;
+  margin: 24px 0;
+}
+.preset-fields legend {
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.preset-fields small {
+  font-size: 10px;
+}
+.preset-fields:disabled input {
+  opacity: 0.8;
+}
+.preset-actions {
+  margin: 20px 0;
+}
+.preset-actions .primary {
+  background: #c7e5f5;
+  color: #092033;
+}
+.preset-panel .view-controls {
+  margin-top: 20px;
+}
+.preset-panel select {
+  min-width: 170px;
+}
+@media (max-width: 700px) {
+  .preset-fields {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+  .preset-actions button {
+    width: 100%;
+  }
+}
+h1,
+h2,
+.preset-panel strong {
+  overflow-wrap: anywhere;
+}

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import Presets from "./Presets";
 
 type Row = Record<string, any>; // Read-only engine evidence; never sent as execution instructions.
 type Run = {
@@ -16,6 +17,7 @@ type Run = {
   limitations: string[];
 };
 type Listing = {
+  preset?: { name: string; version: number };
   id: string;
   label: string;
   complete: boolean;
@@ -723,6 +725,7 @@ function App() {
                   <option key={r.id} value={r.id}>
                     {r.synthetic ? "SYNTHETIC · " : ""}
                     {r.label}
+                    {r.preset ? ` · ${r.preset.name} v${r.preset.version}` : ""}
                   </option>
                 ))}
               </select>
@@ -757,6 +760,13 @@ function App() {
                 Import your first run
               </button>
             </section>
+          )}
+          {!run && !loading && tab === "Applied settings" && (
+            <Presets
+              onApplied={async (newId) => {
+                await refresh(newId);
+              }}
+            />
           )}
           {run && (
             <>
@@ -1023,21 +1033,31 @@ function App() {
               )}
               {tab === "Applied settings" && (
                 <>
+                  <Presets
+                    runId={id}
+                    applied={run.applied_settings.preset}
+                    onApplied={async (newId) => {
+                      await refresh(newId);
+                    }}
+                  />
                   <section className="panel">
                     <div className="section-head">
                       <div>
                         <span className="eyebrow">
                           Immutable applied configuration
                         </span>
-                        <h2>ORB Reference</h2>
+                        <h2>
+                          {run.applied_settings.preset
+                            ? `${run.applied_settings.preset.name} · v${run.applied_settings.preset.version}`
+                            : "ORB Reference signal rules"}
+                        </h2>
                       </div>
                       <Pill>Read only</Pill>
                     </div>
                     <p>
-                      These are the exact inputs used by this run. Preset
-                      selection, editing, save, duplicate and reset remain
-                      mandatory upcoming work; no unsupported control changes
-                      the engine here.
+                      These are the immutable inputs used by this run. The
+                      preset editor above creates saved versions and separate
+                      evaluations; it cannot rewrite these results.
                     </p>
                     <div className="two-col">
                       <div>
