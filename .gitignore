@@ -19,4 +19,6 @@ results/
 # Personal study material must remain outside version control
 personal-notes/
 private-notes/
+node_modules/
+web/build/
 ORB_Personal_Learning_Notes.md
