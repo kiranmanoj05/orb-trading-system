@@ -99,7 +99,7 @@ try {
       .getByLabel("Saved preset", { exact: true })
       .locator("option")
       .count(),
-    1,
+    2,
   );
   await page
     .getByRole("button", { name: "Duplicate saved preset", exact: true })
@@ -273,6 +273,129 @@ try {
       `overflow at ${width}`,
     );
   }
+  await page
+    .getByLabel("Saved preset", { exact: true })
+    .selectOption("orb-mwf");
+  assert(await page.getByLabel("Eligible Mon", { exact: true }).isChecked());
+  assert(!(await page.getByLabel("Eligible Tue", { exact: true }).isChecked()));
+  assert(
+    await page
+      .getByLabel("Planned target reward / risk (R)", { exact: true })
+      .isDisabled(),
+  );
+  await page
+    .getByRole("button", { name: "Duplicate saved preset", exact: true })
+    .click();
+  const target = page.getByLabel("Planned target reward / risk (R)", {
+    exact: true,
+  });
+  await page.waitForFunction(
+    () => !document.querySelector("fieldset").disabled,
+  );
+  await page
+    .getByLabel("Preset name", { exact: true })
+    .fill("3R weekday study");
+  await target.fill("3");
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page
+    .getByText("Saved 3R weekday study v2. Existing runs unchanged.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("button", {
+      name: "Apply saved version to new run",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("heading", { name: "3R weekday study · v2", exact: true })
+    .waitFor();
+  const policyRunId = await page
+    .getByLabel("Selected run", { exact: true })
+    .inputValue();
+  const policyRun = await (
+    await fetch(base + "/api/runs/" + policyRunId)
+  ).json();
+  assert.deepEqual(
+    policyRun.evidence.manifest.config.entry_policy.weekdays,
+    [0, 2, 4],
+  );
+  assert.equal(policyRun.evidence.manifest.config.entry_policy.target_r, "3");
+  assert.equal(policyRun.evidence.portfolio.trades[0].reason, "stop_gap");
+  assert.match(
+    await page.locator("main").textContent(),
+    /Range midpoint \/ 3R/,
+  );
+  console.log(
+    "PASS MWF duplicate and target R change actual engine outcomes and displayed applied rules",
+  );
+  for (const d of ["Mon", "Wed", "Fri"])
+    await page.getByLabel("Eligible " + d, { exact: true }).uncheck();
+  for (const d of ["Tue", "Thu"])
+    await page.getByLabel("Eligible " + d, { exact: true }).check();
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page
+    .getByText("Saved 3R weekday study v3. Existing runs unchanged.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("button", {
+      name: "Apply saved version to new run",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("heading", { name: "3R weekday study · v3", exact: true })
+    .waitFor();
+  const offId = await page
+    .getByLabel("Selected run", { exact: true })
+    .inputValue();
+  const offRun = await (await fetch(base + "/api/runs/" + offId)).json();
+  assert.equal(offRun.evidence.summary.candidate_count, 0);
+  assert.equal(offRun.evidence.summary.total_return, "0");
+  assert.equal(
+    offRun.evidence.portfolio.replay.sessions[0].reason,
+    "weekday_not_eligible",
+  );
+  assert.deepEqual(
+    await (await fetch(base + "/api/runs/" + policyRunId)).json(),
+    policyRun,
+  );
+  console.log(
+    "PASS custom entry weekdays block Friday candidates without rewriting previous profile runs",
+  );
+  for (const d of ["Tue", "Thu"])
+    await page.getByLabel("Eligible " + d, { exact: true }).uncheck();
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page.getByRole("alert").waitFor();
+  assert.match(
+    await page.getByRole("alert").textContent(),
+    /unsupported settings/,
+  );
+  for (const width of [390, 768, 1500]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth + 1,
+      ),
+    );
+  }
+  if (process.env.ORB_POLICY_SCREENSHOT)
+    await page.screenshot({
+      path: process.env.ORB_POLICY_SCREENSHOT,
+      fullPage: true,
+    });
+  console.log("PASS empty schedule validation and responsive policy controls");
   assert.deepEqual(errors, []);
   console.log("PASS preset reflow, reduced motion and no browser errors");
 } finally {

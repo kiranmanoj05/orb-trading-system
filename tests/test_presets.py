@@ -68,7 +68,7 @@ def test_immutable_versions_reference_and_restart(tmp_path):
     with PresetStore(db) as s:
         assert s.get(copy['id'])==updated
         assert s.get(REFERENCE)==fixed
-        assert len(s.list())==2
+        assert len(s.list())==3
         # Editing returned values cannot rewrite a stored snapshot.
         updated['settings']['fee_per_share']='99'
         assert s.get(copy['id'])['settings']['fee_per_share']=='0.01'
@@ -158,7 +158,7 @@ def test_cli_uses_same_contract_and_exclusive_outputs(tmp_path):
     data=json.loads(output.read_text())
     assert data['applied_settings']['preset']['settings_sha256']==p['settings_sha256']
     before=output.read_bytes();assert cli(*args).returncode==2;assert output.read_bytes()==before
-    assert len(json.loads(cli('list').stdout))==2
+    assert len(json.loads(cli('list').stdout))==3
 
 
 @pytest.mark.parametrize('committed',[False,True])

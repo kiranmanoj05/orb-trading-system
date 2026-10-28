@@ -35,8 +35,8 @@ def test_full_preset_flow_persists_versions_but_never_mutates_old_run(tmp_path):
         assert c.get(f"/api/presets/{p['id']}/history").json()[0]['settings']==p['settings']
     with client(db) as c:
         data=c.get('/api/presets').json()
-        assert len(data['presets'])==2
-        assert data['presets'][1]['version']==2
+        assert len(data['presets'])==3
+        assert next(p for p in data['presets'] if not p['readonly'])['version']==2
         assert len(c.get('/api/runs').json())==3  # Preset persistence is not run persistence.
 
 
@@ -54,7 +54,7 @@ def test_apply_and_duplicate_require_exact_positive_version(tmp_path,version):
 def test_bad_preset_settings_are_not_silently_dropped(tmp_path,body):
     with client(tmp_path/'p.sqlite') as c:
         assert c.post('/api/presets',json=body).status_code==422
-        assert len(c.get('/api/presets').json()['presets'])==1
+        assert len(c.get('/api/presets').json()['presets'])==2
 
 
 def test_reference_cannot_be_overwritten_and_mutations_keep_origin_and_body_guards(tmp_path):

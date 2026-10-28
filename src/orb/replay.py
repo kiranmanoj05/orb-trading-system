@@ -11,6 +11,7 @@ from orb.breakout import BreakoutDetector
 from orb.domain import Bar, BreakoutSignal
 from orb.strategy import NEW_YORK, calculate_opening_range
 from orb.session import exchange_session
+from orb.entry_policy import EntryPolicy, resolve_policy
 
 CSV_FIELDS = ("symbol", "start", "open", "high", "low", "close", "volume")
 
@@ -77,7 +78,7 @@ class _Session:
     skip_reason: str | None = None
 
 
-def replay(bars: Iterable[Bar]) -> ReplayResult:
+def replay(bars: Iterable[Bar], *, entry_policy: EntryPolicy | None = None) -> ReplayResult:
     """Consume bars by nondecreasing timestamp, advancing at bar completion.
 
     Equal timestamps for different symbols are permitted. Duplicate symbol/time
@@ -86,6 +87,7 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
     Ending a dataset while READY means incomplete observation, not a full day
     without a signal. Only sessions with regular-session observations are listed.
     """
+    policy = resolve_policy(entry_policy)
     sessions: dict[tuple[str, date], _Session] = {}
     closed_dates: set[tuple[str, date]] = set()
     signals = []
@@ -111,6 +113,9 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
         if not schedule.contains_bar(bar.start):
             continue
         state = sessions.setdefault((bar.symbol, day), _Session())
+        if not policy.allows(day):
+            state.skip_reason = "weekday_not_eligible"
+            continue  # Entry gate only: callers still receive every source bar.
         observed_at = stamp + timedelta(minutes=1)
         range_end = schedule.range_end
         if local < range_end:
@@ -124,7 +129,7 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
             except ValueError as exc:
                 state.skip_reason = str(exc)
             else:
-                state.detector = BreakoutDetector(opening_range, schedule)
+                state.detector = BreakoutDetector(opening_range, schedule, entry_policy=policy)
         if state.detector is not None and local >= range_end:
             signal = state.detector.on_bar(bar, observed_at)
             if signal is not None:
@@ -137,7 +142,7 @@ def replay(bars: Iterable[Bar]) -> ReplayResult:
             status = state.detector.state.value
             reason = state.detector.pause_reason
         else:
-            status = "skipped"
+            status = "inactive" if state.skip_reason == "weekday_not_eligible" else "skipped"
             reason = state.skip_reason or "dataset ended before range completed"
         schedule = exchange_session(day)
         assert schedule is not None

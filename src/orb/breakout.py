@@ -7,6 +7,7 @@ from hashlib import sha256
 from orb.domain import Bar, BreakoutSignal, OpeningRange
 from orb.strategy import NEW_YORK
 from orb.session import ExchangeSession
+from orb.entry_policy import EntryPolicy, resolve_policy
 
 
 class SignalState(str, Enum):
@@ -14,6 +15,7 @@ class SignalState(str, Enum):
     SIGNALLED = "signalled"
     EXPIRED = "expired"
     PAUSED = "paused"
+    INACTIVE = "inactive"
 
 
 class BreakoutDetector:
@@ -26,21 +28,25 @@ class BreakoutDetector:
 
     VERSION = "orb-long-v1"
 
-    def __init__(self, opening_range: OpeningRange, session: ExchangeSession | None = None) -> None:
+    def __init__(self, opening_range: OpeningRange, session: ExchangeSession | None = None, *,
+                 entry_policy: EntryPolicy | None = None) -> None:
         local_start = opening_range.start.astimezone(NEW_YORK)
         local_end = opening_range.end.astimezone(NEW_YORK)
         if (local_start.time() != time(9, 30)
                 or local_end.date() != local_start.date()
                 or local_end.time() != time(9, 45)):
             raise ValueError("detector requires the 09:30–09:45 New York range")
+        self.entry_policy = resolve_policy(entry_policy)
+        self.version = self.entry_policy.strategy_version
         self.opening_range = opening_range
         self.cutoff = datetime.combine(local_start.date(), time(11), NEW_YORK)
         if session is not None:
             if session.opens_at != opening_range.start or session.range_end != opening_range.end:
                 raise ValueError("opening range does not match exchange session")
             self.cutoff = session.entry_cutoff
-        self.state = SignalState.READY
-        self.pause_reason: str | None = None
+        eligible = self.entry_policy.allows(local_start.date())
+        self.state = SignalState.READY if eligible else SignalState.INACTIVE
+        self.pause_reason: str | None = None if eligible else "weekday_not_eligible"
         self._last_bar: Bar | None = None
 
     def _pause(self, reason: str) -> None:
@@ -88,16 +94,16 @@ class BreakoutDetector:
             return None
         stop = self.opening_range.midpoint
         # Stable identity for the single permitted session attempt, not a fill ID.
-        identity = f"{self.VERSION}|{bar.symbol}|{self.cutoff.date()}|1"
+        identity = f"{self.version}|{bar.symbol}|{self.cutoff.date()}|1"
         signal = BreakoutSignal(
             signal_id=sha256(identity.encode()).hexdigest()[:32],
-            strategy_version=self.VERSION,
+            strategy_version=self.version,
             symbol=bar.symbol,
             bar_start=bar.start.astimezone(timezone.utc),
             observed_at=observed_at.astimezone(timezone.utc),
             entry_reference=bar.close,
             stop=stop,
-            target=bar.close + 2 * (bar.close - stop),
+            target=bar.close + self.entry_policy.target_r * (bar.close - stop),
         )
         self.state = SignalState.SIGNALLED
         return signal

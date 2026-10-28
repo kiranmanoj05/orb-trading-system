@@ -61,7 +61,7 @@ def build_dashboard_run(bars, *args, **kwargs) -> dict:
         'capabilities': {'order_submission': False, 'live_stream': False,
                          'preset_editing': False},
         'applied_settings': {'sha256': _digest(applied), 'values': applied,
-                             'preset': None, 'strategy_reference': 'ORB Reference', 'mutable': False},
+                             'preset': None, 'strategy_reference': ('ORB variant' if 'entry_policy' in result['manifest']['config'] else 'ORB Reference'), 'mutable': False},
         'health': {key: result['summary'][key] for key in
                    ('coverage_complete', 'outcomes_complete', 'marks_complete')},
         'metrics_eligible': result['valuation']['metrics_eligible'],

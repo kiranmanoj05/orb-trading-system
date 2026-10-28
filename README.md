@@ -68,10 +68,13 @@ In **Applied settings**, duplicate ORB Reference to edit supported risk/cost
 settings, save a new version, reset a draft, inspect version history and apply an
 exact saved version to a **new** historical run. Presets persist in the local
 SQLite file `results/dashboard-presets.sqlite` (override with `--preset-db`).
-Existing runs keep their frozen settings. Imports/runs still clear on restart;
-export evidence and retain original source files. Weekday/R changes and durable
-entry/concurrency counters remain upcoming work, explicitly unavailable in the
-editor. See [preset controls and CLI](docs/research-presets.md).
+Existing runs keep their frozen settings. ORB MWF now provides an independent
+Monday/Wednesday/Friday entry schedule with otherwise identical baseline rules;
+custom presets support NY entry weekdays and planned target R. These are
+research variants, not claims of safer or improved returns. Imports/runs still
+clear on restart. Durable entry/concurrency counters remain upcoming work.
+See [preset controls and CLI](docs/research-presets.md) and
+[weekday/target variants](docs/trading-profile-variants.md).
 
 ## Dashboard contract and synthetic examples
 
@@ -104,9 +107,9 @@ fractions; Markdown reports percentages and explicit cost units. Old reports
 remain snapshots: regenerate from source data to obtain the new semantics.
 
 Supported risk/cost presets now provide selection, edit/save/duplicate/reset,
-draft versus applied state and immutable saved versions. Weekday/R/timing/stop
-variants and restart-safe entry/concurrency controls remain mandatory future
-scope. No setting is exposed as operative before its engine support exists.
+draft versus applied state and immutable saved versions. Weekday/target-R
+variants now reach the engine. Timing/stop variants and restart-safe
+entry/concurrency controls remain mandatory future scope. No setting is exposed as operative before its engine support exists.
 
 ## Baseline strategy
 
