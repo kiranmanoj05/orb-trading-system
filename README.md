@@ -64,10 +64,14 @@ The service verifies source/configuration identities and recomputes results
 with the current engine; it never displays uploaded metrics as verified results.
 Missing-data gates remain intact. See [local dashboard details](docs/local-dashboard.md).
 
-Versioned editable presets, durable run/job storage, paper observation and news
-remain upcoming work. Applied settings are currently read only; no dummy
-controls imply unsupported strategy or risk behaviour. Imports last this server
-session only. Export dashboard evidence before restarting when needed.
+In **Applied settings**, duplicate ORB Reference to edit supported risk/cost
+settings, save a new version, reset a draft, inspect version history and apply an
+exact saved version to a **new** historical run. Presets persist in the local
+SQLite file `results/dashboard-presets.sqlite` (override with `--preset-db`).
+Existing runs keep their frozen settings. Imports/runs still clear on restart;
+export evidence and retain original source files. Weekday/R changes and durable
+entry/concurrency counters remain upcoming work, explicitly unavailable in the
+editor. See [preset controls and CLI](docs/research-presets.md).
 
 ## Dashboard contract and synthetic examples
 
@@ -77,7 +81,7 @@ same evaluator as the research CLI and attaches canonical candles with explicit
 availability times, complete opening ranges, signal/fill distinctions, decision
 reasons and linked account events. The local API/viewer uses this contract.
 The import adapter validates original source plus optional saved-report settings;
-there is no editable preset system yet.
+risk/cost presets use the same validated settings contract as the API and CLI.
 
 Generate three reproducible acceptance runs without credentials:
 
@@ -99,9 +103,10 @@ still suppress aggregate metrics. JSON returns/drawdowns/win rates are decimal
 fractions; Markdown reports percentages and explicit cost units. Old reports
 remain snapshots: regenerate from source data to obtain the new semantics.
 
-Versioned editable/saved presets remain a mandatory next platform milestone.
-This contract fingerprints applied evaluator inputs and reference rules, with
-no claim that preset selection, draft editing or durable counters exist yet.
+Supported risk/cost presets now provide selection, edit/save/duplicate/reset,
+draft versus applied state and immutable saved versions. Weekday/R/timing/stop
+variants and restart-safe entry/concurrency controls remain mandatory future
+scope. No setting is exposed as operative before its engine support exists.
 
 ## Baseline strategy
 

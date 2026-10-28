@@ -11,7 +11,7 @@ from orb.dashboard import build_dashboard_run
 from orb.evaluation import _digest
 from orb.ingestion import _decode, normalise_capture
 from orb.replay import load_bars
-from orb.risk import RiskLimits
+from orb.research_settings import ResearchSettings
 from orb.strategy import NEW_YORK
 
 MAX_BYTES = 10 * 1024 * 1024
@@ -28,7 +28,7 @@ def _settings(report):
         raise ValueError('saved evaluation must contain a manifest')
     manifest = report['manifest']
     schema = manifest.get('schema_version')
-    base = manifest.get('base_schema_version') if schema == 'orb-evaluation-bundle-v1' else schema
+    base = manifest.get('base_schema_version') if schema in ('orb-evaluation-bundle-v1', 'orb-evaluation-profile-v1') else schema
     if base not in ('orb-evaluation-v4', 'orb-evaluation-v5'):
         raise ValueError('supported saved evaluations are v4/v5 and their bundle wrappers')
     if report.get('evaluation_id') != _digest(manifest):
@@ -38,22 +38,20 @@ def _settings(report):
         raise ValueError('unsupported saved evaluation configuration fields')
     if config['symbols'] != ['SPY', 'QQQ'] or config['bounds_source'] not in ('explicit', 'observed_dates'):
         raise ValueError('unsupported saved evaluation scope')
-    for name in CONFIG_FIELDS - {'symbols', 'bounds_source', 'start_session', 'end_session'}:
-        if not isinstance(config[name], str) or len(config[name]) > 32:
-            raise ValueError('saved decimal settings must be bounded strings')
-        number = Decimal(config[name])
-        if not number.is_finite() or number < 0 or number > Decimal('1e12') or abs(number.as_tuple().exponent) > 12:
-            raise ValueError('saved decimal settings exceed local viewer numeric bounds')
+    supported = ResearchSettings.from_config(config)
+    if schema == 'orb-evaluation-profile-v1':
+        from orb.profile_runs import validated_snapshot
+        profile = validated_snapshot(manifest.get('profile'))
+        if set(manifest['profile']) != set(profile):
+            raise ValueError('unsupported saved profile metadata')
+        saved_settings = ResearchSettings.from_dict(profile.get('settings'))
+        if saved_settings != supported or profile.get('settings_sha256') != saved_settings.fingerprint:
+            raise ValueError('profile snapshot disagrees with applied settings')
     start, end = (date.fromisoformat(config[k]) for k in ('start_session', 'end_session'))
     if not 0 <= (end - start).days < MAX_DAYS:
         raise ValueError('local viewer supports at most 31 calendar days per import')
-    return dict(initial_cash=Decimal(config['initial_cash']),
-                limits=RiskLimits(*(Decimal(config[k]) for k in ('risk_fraction',
-                    'max_position_fraction', 'max_gross_fraction', 'max_total_risk_fraction'))),
-                slippage_bps=Decimal(config['slippage_bps']),
-                fee_per_share=Decimal(config['fee_per_share']),
-                daily_loss_fraction=Decimal(config['daily_loss_fraction']),
-                **(dict(start_session=start, end_session=end) if config['bounds_source'] == 'explicit' else {}))
+    return {**supported.engine_kwargs(),
+            **(dict(start_session=start, end_session=end) if config['bounds_source'] == 'explicit' else {})}
 
 
 def import_dashboard(payload: dict) -> dict:
@@ -121,6 +119,16 @@ def import_dashboard(payload: dict) -> dict:
         manifest['base_schema_version'] = manifest['schema_version']
         manifest['schema_version'] = 'orb-evaluation-bundle-v1'
         manifest['dataset']['source_bundle'] = {**bundle, 'integrity_verified': True}
+        run['evaluation_id'] = evidence['evaluation_id'] = _digest(manifest)
+    if saved is not None and saved['manifest']['schema_version'] == 'orb-evaluation-profile-v1':
+        from copy import deepcopy
+        snapshot = deepcopy(saved['manifest']['profile'])
+        manifest = evidence['manifest']
+        manifest['base_schema_version'] = 'orb-evaluation-v5'
+        manifest['schema_version'] = 'orb-evaluation-profile-v1'
+        manifest['profile'] = snapshot
+        run['applied_settings']['preset'] = snapshot
+        run['applied_settings']['sha256'] = _digest({'values': run['applied_settings']['values'], 'preset': snapshot})
         run['evaluation_id'] = evidence['evaluation_id'] = _digest(manifest)
     run['import_context'] = {
         'kind': kind, 'synthetic': bundle['data_kind'] == 'synthetic' if bundle else None,

@@ -16,8 +16,8 @@ from orb.session import exchange_session
 def build_dashboard_run(bars, *args, **kwargs) -> dict:
     """Evaluate once and attach matching chart/evidence data, never a live view.
 
-    This initial contract accepts canonical bars, not arbitrary imported JSON.
-    Existing saved-report migration and bundle import belong to the API slice.
+    This contract accepts canonical bars, not arbitrary imported JSON.
+    Validated source/report imports live in dashboard_import.
     The full historical candle series is for retrospective inspection only.
     available_at is explicit so a later replay can hide unavailable candles.
     """
@@ -68,6 +68,6 @@ def build_dashboard_run(bars, *args, **kwargs) -> dict:
         'candles': candles, 'opening_ranges': ranges, 'decisions': decisions,
         'evidence': result,
         'limitations': ['Retrospective data snapshot; not a live account or causal news explanation.',
-                        'No preset editor yet; settings are the exact applied evaluator inputs.',
+                        'Applied settings are frozen; saved preset changes require a separate evaluation.',
                         'Historical candles after a decision are review evidence, not signal inputs.'],
     }
