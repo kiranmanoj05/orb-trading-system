@@ -11,6 +11,7 @@ from orb.daily_loss import DailyLossGuard
 from orb.risk import MarketMark, RiskLimits, _decimal
 from orb.session import exchange_session
 from orb.strategy import NEW_YORK
+from orb.entry_policy import EntryPolicy, resolve_policy
 from orb.simulation import ExecutionConfig, simulate
 
 
@@ -47,7 +48,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                      limits: RiskLimits | None = None, *,
                      slippage_bps: Decimal = Decimal("0"),
                      fee_per_share: Decimal = Decimal("0"),
-                     daily_loss_fraction: Decimal = Decimal("0.02")) -> dict:
+                     daily_loss_fraction: Decimal = Decimal("0.02"),
+                     entry_policy: EntryPolicy | None = None) -> dict:
     """Apply simulated events to one shared account without future funding.
 
     Fill paths are quantity-independent under the existing no-market-impact
@@ -67,7 +69,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     account = AccountLedger(initial_cash, limits)
     config = ExecutionConfig(1, slippage_bps, fee_per_share)
     data = list(bars)
-    paths = simulate(data, config)
+    policy = resolve_policy(entry_policy)
+    paths = simulate(data, config, entry_policy=policy)
     observed = {s.signal_id: s.observed_at for s in paths.replay_result.signals}
     paths = replace(paths,
                     replay_result=replace(paths.replay_result,
@@ -192,7 +195,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     for item in account.allocations:
         if item.state == "open":
             account.mark_unresolved(item.order_id)
-    return _json({"model_version": "portfolio-session-loss-v3",
+    return _json({"model_version": "portfolio-session-loss-v3" if policy.is_reference else "portfolio-entry-policy-v1",
+                  **({"entry_policy": policy.to_dict()} if not policy.is_reference else {}),
                   "config": {"initial_cash": initial_cash, "limits": asdict(limits),
                              "slippage_bps": slippage_bps, "fee_per_share": fee_per_share,
                              "daily_loss_fraction": daily_loss_fraction,

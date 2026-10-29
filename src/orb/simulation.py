@@ -9,6 +9,7 @@ from orb.domain import Bar
 from orb.replay import ReplayResult, replay
 from orb.session import exchange_session
 from orb.strategy import NEW_YORK
+from orb.entry_policy import EntryPolicy, resolve_policy
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class SimulationResult:
     replay_result: ReplayResult
     config: ExecutionConfig
     trades: tuple[SimulatedTrade, ...]
+    entry_policy: EntryPolicy | None = None
 
     def to_dict(self) -> dict:
         def convert(value):
@@ -63,12 +65,15 @@ class SimulationResult:
             if isinstance(value, (tuple, list)):
                 return [convert(v) for v in value]
             return value
-        return {"model_version": "minute-long-v1", "replay": self.replay_result.to_dict(),
+        policy = resolve_policy(self.entry_policy)
+        return {"model_version": "minute-long-v1" if policy.is_reference else "minute-long-policy-v1",
+                **({'entry_policy': policy.to_dict()} if not policy.is_reference else {}), "replay": self.replay_result.to_dict(),
                 "config": convert(asdict(self.config)),
                 "trades": convert([asdict(t) for t in self.trades])}
 
 
-def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None) -> SimulationResult:
+def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None, *,
+             entry_policy: EntryPolicy | None = None) -> SimulationResult:
     """Replay signals, then apply causal fills to each symbol/session.
 
     Signals are produced by the existing chronological replay. Later bars may
@@ -81,7 +86,8 @@ def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None) -> Simu
     """
     config = config or ExecutionConfig()
     data = list(bars)
-    result = replay(data)  # Also validates global chronology and duplicate keys.
+    policy = resolve_policy(entry_policy)
+    result = replay(data, entry_policy=policy)  # Also validates global chronology and duplicate keys.
     grouped = {}
     for bar in data:
         day = bar.start.astimezone(NEW_YORK).date()
@@ -107,7 +113,7 @@ def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None) -> Simu
         if entry <= signal.stop:
             trades.append(SimulatedTrade(**fields, status="unfilled", reason="entry_at_or_below_stop"))
             continue
-        target = entry + 2 * (entry - signal.stop)
+        target = entry + policy.target_r * (entry - signal.stop)
         fields.update(entry_at=future[0].start, entry_price=entry, stop=signal.stop, target=target)
         expected = signal.observed_at
         for bar in future:
@@ -138,4 +144,4 @@ def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None) -> Simu
             break
         else:
             trades.append(SimulatedTrade(**fields, status="unresolved", reason="dataset_ended_with_position"))
-    return SimulationResult(result, config, tuple(trades))
+    return SimulationResult(result, config, tuple(trades), policy)

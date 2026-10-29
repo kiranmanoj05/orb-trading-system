@@ -1,9 +1,9 @@
 # Versioned research presets
 
 The local platform now has real selection, edit/save/duplicate/reset, historical
-version inspection and application to a separate historical evaluation. This
-increment covers **supported risk and cost inputs**; it does not implement all
-planned trading-style or schedule controls.
+version inspection and application to a separate historical evaluation. This now covers **supported risk/cost inputs plus New York entry weekdays and
+planned target R**. Other trading-style/timing/stop rules and durable caps remain
+unsupported. See trading-profile-variants.md for exact semantics and compatibility.
 
 ## Use in the dashboard
 
@@ -23,12 +23,12 @@ A transient preset-load error has a working reload path.
 
 ## Shared contract and limits
 
-`ResearchSettings` is authoritative for the new preset CLI, API/editor and saved
+`ResearchSettings` v2 is authoritative for the new preset CLI, API/editor and saved
 report imports. Settings JSON has exactly these string fields:
 
 | Field | Unit / supported range |
 | --- | --- |
-| schema_version | `orb-research-settings-v1` |
+| schema_version | `orb-research-settings-v2` (v1 retained for old records) |
 | initial_cash | USD, positive, at most 1e12 |
 | risk_fraction | Equity fraction, greater than 0 and at most 1 |
 | max_position_fraction | Allocation fraction, greater than 0 and at most 1 |
@@ -37,6 +37,8 @@ report imports. Settings JSON has exactly these string fields:
 | daily_loss_fraction | Entry-block loss threshold fraction, greater than 0 and at most 1 |
 | slippage_bps | Basis points per market side, 0–1000 |
 | fee_per_share | USD/share/side, 0–1000 |
+| target_r | Decimal string, planned price reward/risk, 0.25–10 |
+| weekdays | Nonempty ordered unique JSON integers 0–4 (Mon–Fri), NY session dates |
 
 `0.005` means **0.5%**, not 0.005%. Exact decimal strings avoid silently using
 binary floating-point values. JSON numbers, booleans, missing/unknown fields,
@@ -51,12 +53,12 @@ the headline risk budget. Daily loss blocks new entries rather than guaranteeing
 loss size or flattening inventory. Cost assumptions are scenarios, not measured
 Alpaca execution costs.
 
-The following remain fixed or unsupported: SPY/QQQ long-only; all eligible NY
-exchange weekdays; [09:30,09:45) range; completed close strictly above frozen high
-before 11:00; midpoint stop; planned 2R; one candidate/symbol/session. Weekday/R,
-range/entry timing, alternative stops and configurable session/concurrency caps
-are explicitly unavailable. No MWF preset pretends to work before its schedule
-logic exists. Customisation is not evidence of economic improvement.
+The reference remains SPY/QQQ long-only, all eligible NY exchange weekdays,
+[09:30,09:45) range, completed close strictly above frozen high before 11:00,
+midpoint stop, planned 2R and one candidate/symbol/session. The independently
+defined ORB MWF changes only weekdays to Monday/Wednesday/Friday. Custom v2
+versions can change weekdays and target R. Range/entry timing, alternative stops
+and configurable session/concurrency caps remain explicitly unavailable. Customisation is not evidence of economic improvement.
 
 ## Persistence and identity
 
@@ -127,7 +129,18 @@ Existing loopback Host/Origin, JSON, content-policy and size guards apply. Prese
 mutations have an 8 KiB limit. No order, paper activation, news or credential
 endpoint is added. Public hosting still requires separate design/authorisation.
 
-Next: supported weekday/target variants, restart-safe entry/concurrency limits
+Next: restart-safe entry/concurrency limits
 with pending/partial-fill semantics, then persistent research comparisons and
 holdouts. Preserve the fixed reference and the distinction between software
 verification, historical economic evidence and paper observation.
+
+
+## v1 record compatibility
+
+Existing v1 rows, hashes and saved snapshots retain their eight original decimal
+fields exactly. They continue to mean all weekdays and 2R. The editor expands a
+v1 record into an explicit v2 draft using those semantics; a user save appends a
+v2 version and never rewrites the old row. Loading alone does not migrate data.
+The built-in Reference stays at its original v1 identity, while ORB MWF is a
+protected v2 preset. Their risk/cost/stop/entry defaults match. Applying explicit
+v2 reference values still uses the unchanged baseline behaviour.

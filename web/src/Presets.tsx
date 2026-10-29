@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from "react";
 
-type Settings = Record<string, string>;
+type Settings = Record<string, string | number[]>;
+function editable(s: Settings): Settings {
+  return {
+    ...s,
+    schema_version: "orb-research-settings-v2",
+    target_r: s.target_r || "2",
+    weekdays: Array.isArray(s.weekdays) ? [...s.weekdays] : [0, 1, 2, 3, 4],
+  };
+}
 type Preset = {
   id: string;
   version: number;
@@ -17,7 +25,9 @@ type Contract = {
     minimum: string;
     maximum: string;
     zero_allowed: boolean;
+    minimum_inclusive?: boolean;
   }[];
+  weekdays: { value: number; label: string }[];
   unsupported: string[];
   notice: string;
 };
@@ -58,7 +68,7 @@ export default function Presets({
   function load(p: Preset) {
     if (p.id !== saved?.id || p.version !== saved?.version) setHistory([p]);
     setSaved(p);
-    setDraft({ ...p.settings });
+    setDraft(editable(p.settings));
     setName(p.name);
     setNotice("");
     setError("");
@@ -95,7 +105,7 @@ export default function Presets({
   const dirty =
     !!saved &&
     (name !== saved.name ||
-      Object.keys(draft).some((k) => draft[k] !== saved.settings[k]));
+      JSON.stringify(draft) !== JSON.stringify(editable(saved.settings)));
   async function action(work: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -161,7 +171,7 @@ export default function Presets({
                 {list.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} · v{p.version}
-                    {p.readonly ? " · fixed reference" : ""}
+                    {p.readonly ? " · fixed preset" : ""}
                   </option>
                 ))}
               </select>
@@ -215,8 +225,8 @@ export default function Presets({
           <fieldset disabled={saved.readonly || busy} className="preset-fields">
             <legend>
               {saved.readonly
-                ? "Fixed reference · duplicate to edit"
-                : "Draft risk & cost settings"}
+                ? "Fixed preset · duplicate to edit"
+                : "Draft strategy, risk & cost settings"}
             </legend>
             {contract.fields.map((f) => (
               <label key={f.key}>
@@ -224,18 +234,60 @@ export default function Presets({
                 <input
                   aria-label={f.label}
                   inputMode="decimal"
-                  value={draft[f.key] || ""}
+                  value={
+                    typeof draft[f.key] === "string" ? String(draft[f.key]) : ""
+                  }
                   onChange={(e) =>
                     setDraft({ ...draft, [f.key]: e.target.value })
                   }
                 />
                 <small>
-                  {f.zero_allowed ? "Minimum" : "Greater than"} {f.minimum};
-                  maximum {f.maximum}
+                  {(f.minimum_inclusive ?? f.zero_allowed)
+                    ? "Minimum"
+                    : "Greater than"}{" "}
+                  {f.minimum}; maximum {f.maximum}
                   {f.key.includes("fraction") ? " · 0.005 = 0.5%" : ""}
                 </small>
               </label>
             ))}
+          </fieldset>
+          <fieldset
+            disabled={saved.readonly || busy}
+            className="weekday-fields"
+          >
+            <legend>Eligible entry weekdays · New York session dates</legend>
+            <div className="controls">
+              {contract.weekdays.map((day) => (
+                <label key={day.value} className="check">
+                  <input
+                    type="checkbox"
+                    aria-label={`Eligible ${day.label}`}
+                    checked={
+                      Array.isArray(draft.weekdays) &&
+                      draft.weekdays.includes(day.value)
+                    }
+                    onChange={(e) => {
+                      const days = Array.isArray(draft.weekdays)
+                        ? draft.weekdays
+                        : [];
+                      setDraft({
+                        ...draft,
+                        weekdays: (e.target.checked
+                          ? [...days, day.value]
+                          : days.filter((d) => d !== day.value)
+                        ).sort(),
+                      });
+                    }}
+                  />
+                  {day.label}
+                </label>
+              ))}
+            </div>
+            <p className="caption">
+              Eligible means allowed to seek a setup, not guaranteed to trade.
+              Holidays do not roll forward. Valuation and position management
+              continue on inactive days.
+            </p>
           </fieldset>
           <div className="controls preset-actions">
             <button

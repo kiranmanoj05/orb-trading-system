@@ -849,3 +849,17 @@ h2,
 .preset-panel strong {
   overflow-wrap: anywhere;
 }
+.weekday-fields {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px;
+  margin: 20px 0;
+}
+.weekday-fields legend {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 10px;
+}
+.weekday-fields .check {
+  margin-right: 12px;
+}

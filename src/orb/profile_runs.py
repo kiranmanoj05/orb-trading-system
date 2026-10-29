@@ -51,7 +51,7 @@ def apply_preset(original, preset):
     run['applied_settings']['sha256'] = _digest({'values': run['applied_settings']['values'], 'preset': snapshot})
     run['import_context'] = deepcopy(original['import_context'])
     run['import_context'].update(parent_evaluation_id=original['evaluation_id'],
-        notice='New historical evaluation using an exact saved risk/cost preset. '
+        notice='New historical evaluation using an exact saved research preset. '
                'Source integrity metadata is retained; no provider authenticity is established.')
     run['limitations'] = [v for v in run['limitations'] if 'No preset editor yet' not in v]
     run['capabilities']['preset_editing'] = True  # Editing creates versions, never mutates this run.

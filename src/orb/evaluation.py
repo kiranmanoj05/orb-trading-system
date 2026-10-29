@@ -19,6 +19,7 @@ from orb.session import exchange_session
 from orb.strategy import NEW_YORK
 from orb.valuation import market_valuation
 from orb.outcomes import outcome_class
+from orb.entry_policy import EntryPolicy, resolve_policy
 
 
 def _decimal(value: Decimal) -> str:
@@ -41,7 +42,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
              slippage_bps: Decimal = Decimal("0"), fee_per_share: Decimal = Decimal("0"),
              daily_loss_fraction: Decimal = Decimal("0.02"),
              data_label: str = "unspecified",
-             start_session: date | None = None, end_session: date | None = None) -> dict:
+             start_session: date | None = None, end_session: date | None = None,
+             entry_policy: EntryPolicy | None = None) -> dict:
     """Evaluate the fixed SPY/QQQ baseline; never treat absent bars as no trades.
 
     Without explicit date bounds, coverage spans observed New York dates only.
@@ -85,9 +87,10 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     limits = RiskLimits(*(Decimal(_decimal(getattr(limits, name))) for name in
                           ("risk_fraction", "max_position_fraction", "max_gross_fraction",
                            "max_total_risk_fraction")))
+    policy = resolve_policy(entry_policy)
     result = replay_portfolio(canonical, initial_cash, limits,
                               slippage_bps=slippage_bps, fee_per_share=fee_per_share,
-                              daily_loss_fraction=daily_loss_fraction)
+                              daily_loss_fraction=daily_loss_fraction, entry_policy=policy)
     dataset_rows = [[b.symbol, b.start.isoformat(),
                      *(_decimal(p) for p in (b.open, b.high, b.low, b.close)), b.volume]
                     for b in canonical]
@@ -120,7 +123,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
     valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v5",
+        "schema_version": "orb-evaluation-v5" if policy.is_reference else "orb-evaluation-v6",
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -135,9 +138,10 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                    "fee_per_share": _decimal(fee_per_share),
                    "start_session": str(start), "end_session": str(end),
                    "bounds_source": "explicit" if explicit else "observed_dates",
-                   "symbols": ["SPY", "QQQ"]},
+                   "symbols": ["SPY", "QQQ"],
+                   **({"entry_policy": policy.to_dict()} if not policy.is_reference else {})},
         "engine": {"source_sha256": engine_fingerprint(),
-                   "strategy_version": BreakoutDetector.VERSION,
+                   "strategy_version": policy.strategy_version,
                    "portfolio_model": result["model_version"],
                    "calendar": "XNYS", "exchange_calendars": version("exchange-calendars"),
                    "dependencies": {name: version(name) for name in
@@ -228,4 +232,11 @@ def render_report(result: dict) -> str:
                   f"Canonical CSV SHA-256: {source['csv_sha256']}",
                   f"Kind: {source['data_kind']}; feed: {source['request']['feed']}",
                   "Archive integrity verified; provider authenticity and point-in-time availability unverified."]
+    policy = m['config'].get('entry_policy')
+    if policy:
+        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+        lines += ['', '## Entry policy variant', '',
+                  'New York eligible weekdays: ' + ', '.join(days[d] for d in policy['weekdays']),
+                  f"Planned price reward/risk: {policy['target_r']}R; not a net payoff guarantee.",
+                  'Schedule gates new candidates only; all valuation/coverage/account observations remain.']
     return "\n".join(lines) + "\n"

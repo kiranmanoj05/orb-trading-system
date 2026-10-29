@@ -128,8 +128,8 @@ for that independent research step.
   and immutable per-run versions are implemented (research-presets.md).
   Complete the remaining strategy/schedule controls and durable caps before
   calling the broader preset acceptance criteria complete.
-- NY weekday variants and supported target settings, with the reference fixed;
-  durable entry/concurrency counters and pending/partial-fill semantics before
+- NY weekday variants and target-R settings are now implemented with a fixed
+  reference (trading-profile-variants.md). Next: durable entry/concurrency counters and pending/partial-fill semantics before
   exposing those controls. Schedule gates entries, never position management.
 - Durable research run/job storage, comparisons/cost stress and chronological
   holdouts. No automated chasing of yesterday's best parameters.
@@ -157,3 +157,15 @@ Run the additional preset browser workflow with:
 ```bash
 npm --prefix web run test:presets
 ```
+
+
+## Weekday/target increment (28 October 2026)
+
+The saved-preset flow now supports explicit v2 weekday and planned target-R
+fields through CLI/API/UI and the same Python engine. ORB MWF changes only entry
+days; custom schedules do not force trades or roll holidays into other days.
+Inactive-day bars still feed coverage, valuation, account and daily-loss checks.
+The target multiple is used at signal creation and recomputed from actual
+modeled fill price for exits. Default reference traces stay identical; variant
+configurations are explicit in v6 evaluation manifests and applied snapshots.
+Prior v1 records/identities remain readable without database row migration.

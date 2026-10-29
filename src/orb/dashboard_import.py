@@ -29,12 +29,13 @@ def _settings(report):
     manifest = report['manifest']
     schema = manifest.get('schema_version')
     base = manifest.get('base_schema_version') if schema in ('orb-evaluation-bundle-v1', 'orb-evaluation-profile-v1') else schema
-    if base not in ('orb-evaluation-v4', 'orb-evaluation-v5'):
-        raise ValueError('supported saved evaluations are v4/v5 and their bundle wrappers')
+    if base not in ('orb-evaluation-v4', 'orb-evaluation-v5', 'orb-evaluation-v6'):
+        raise ValueError('supported saved evaluations are v4–v6 and their wrappers')
     if report.get('evaluation_id') != _digest(manifest):
         raise ValueError('saved evaluation manifest fingerprint mismatch')
     config = manifest.get('config')
-    if not isinstance(config, dict) or set(config) != CONFIG_FIELDS:
+    expected_fields = CONFIG_FIELDS | ({'entry_policy'} if base == 'orb-evaluation-v6' else set())
+    if not isinstance(config, dict) or set(config) != expected_fields:
         raise ValueError('unsupported saved evaluation configuration fields')
     if config['symbols'] != ['SPY', 'QQQ'] or config['bounds_source'] not in ('explicit', 'observed_dates'):
         raise ValueError('unsupported saved evaluation scope')
@@ -45,7 +46,7 @@ def _settings(report):
         if set(manifest['profile']) != set(profile):
             raise ValueError('unsupported saved profile metadata')
         saved_settings = ResearchSettings.from_dict(profile.get('settings'))
-        if saved_settings != supported or profile.get('settings_sha256') != saved_settings.fingerprint:
+        if saved_settings.current_values() != supported.current_values() or profile.get('settings_sha256') != saved_settings.fingerprint:
             raise ValueError('profile snapshot disagrees with applied settings')
     start, end = (date.fromisoformat(config[k]) for k in ('start_session', 'end_session'))
     if not 0 <= (end - start).days < MAX_DAYS:
@@ -124,7 +125,7 @@ def import_dashboard(payload: dict) -> dict:
         from copy import deepcopy
         snapshot = deepcopy(saved['manifest']['profile'])
         manifest = evidence['manifest']
-        manifest['base_schema_version'] = 'orb-evaluation-v5'
+        manifest['base_schema_version'] = ('orb-evaluation-v6' if 'entry_policy' in manifest['config'] else 'orb-evaluation-v5')
         manifest['schema_version'] = 'orb-evaluation-profile-v1'
         manifest['profile'] = snapshot
         run['applied_settings']['preset'] = snapshot

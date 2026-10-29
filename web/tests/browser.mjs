@@ -166,7 +166,7 @@ try {
     await fetch(base + "/api/runs/" + listing[0].id)
   ).json();
   await page
-    .getByLabel("Saved evaluation JSON (optional, v4/v5)")
+    .getByLabel("Saved evaluation JSON (optional, v4–v6)")
     .setInputFiles({
       name: "mismatch.json",
       mimeType: "application/json",
@@ -176,7 +176,7 @@ try {
   await page.getByRole("alert").waitFor();
   assert.equal((await (await fetch(base + "/api/runs")).json()).length, 3);
   await page
-    .getByLabel("Saved evaluation JSON (optional, v4/v5)")
+    .getByLabel("Saved evaluation JSON (optional, v4–v6)")
     .setInputFiles([]);
   await page.getByRole("button", { name: "Validate & import" }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });

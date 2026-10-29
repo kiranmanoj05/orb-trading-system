@@ -10,9 +10,10 @@ from threading import RLock
 from uuid import uuid4
 
 from orb.ingestion import _object, _invalid_constant
-from orb.research_settings import ResearchSettings, settings_contract
+from orb.research_settings import ResearchSettings, settings_contract, SCHEMA
 
 REFERENCE = 'orb-reference'
+MWF = 'orb-mwf'
 APP_ID = 0x4F524250
 
 
@@ -89,6 +90,12 @@ class PresetStore:
         return dict(id=REFERENCE, version=1, name='ORB Reference', settings=s.to_dict(),
                     settings_sha256=s.fingerprint, readonly=True, created_at=None)
 
+    @staticmethod
+    def mwf():
+        s = ResearchSettings(weekdays=(0, 2, 4), schema_version=SCHEMA)
+        return dict(id=MWF, version=1, name='ORB MWF', settings=s.to_dict(),
+                    settings_sha256=s.fingerprint, readonly=True, created_at=None)
+
     def _record(self, row):
         if row is None:
             raise KeyError('preset version not found')
@@ -102,10 +109,10 @@ class PresetStore:
     def get(self, preset_id, version=None):
         if version is not None and (type(version) is not int or version < 1):
             raise ValueError('preset version must be a positive integer')
-        if preset_id == REFERENCE:
+        if preset_id in (REFERENCE, MWF):
             if version not in (None, 1):
                 raise KeyError('reference version not found')
-            return self.reference()
+            return self.reference() if preset_id == REFERENCE else self.mwf()
         with self.lock:
             if version is None:
                 row = self.db.execute('SELECT * FROM preset_versions WHERE preset_id=? '
@@ -118,11 +125,11 @@ class PresetStore:
     def list(self):
         with self.lock:
             ids = [r[0] for r in self.db.execute('SELECT DISTINCT preset_id FROM preset_versions ORDER BY preset_id')]
-            return [self.reference(), *(self.get(p) for p in ids)]
+            return [self.reference(), self.mwf(), *(self.get(p) for p in ids)]
 
     def history(self, preset_id):
-        if preset_id == REFERENCE:
-            return [self.reference()]
+        if preset_id in (REFERENCE, MWF):
+            return [self.reference() if preset_id == REFERENCE else self.mwf()]
         with self.lock:
             rows = list(self.db.execute('SELECT * FROM preset_versions WHERE preset_id=? ORDER BY version', (preset_id,)))
             if not rows:
@@ -132,8 +139,8 @@ class PresetStore:
     def save(self, name, settings, *, preset_id=None, expected_version=None):
         name = _name(name)
         s = ResearchSettings.from_dict(settings)
-        if preset_id == REFERENCE:
-            raise PresetConflict('ORB Reference is fixed; duplicate it to create a variant')
+        if preset_id in (REFERENCE, MWF):
+            raise PresetConflict('Built-in presets are fixed; duplicate to create a variant')
         if preset_id is None and expected_version is not None:
             raise ValueError('new preset must not specify an expected version')
         with self._transaction():

@@ -1,14 +1,16 @@
 """One explicit risk/cost contract for supported historical research controls."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 
 from orb.risk import RiskLimits
 from orb.simulation import ExecutionConfig
+from orb.entry_policy import EntryPolicy
 
-SCHEMA = 'orb-research-settings-v1'
+LEGACY_SCHEMA = 'orb-research-settings-v1'
+SCHEMA = 'orb-research-settings-v2'
 # Fraction fields are fractions in storage, never percentages.
 FIELDS = (
     ('initial_cash', 'Starting capital (USD)', '10000', '0', '1000000000000', False),
@@ -39,6 +41,9 @@ class ResearchSettings:
     daily_loss_fraction: Decimal = Decimal('0.02')
     slippage_bps: Decimal = Decimal('0')
     fee_per_share: Decimal = Decimal('0')
+    target_r: Decimal = Decimal('2')
+    weekdays: tuple[int, ...] = (0, 1, 2, 3, 4)
+    schema_version: str = LEGACY_SCHEMA
 
     def __post_init__(self):
         for key, _, _, lower, upper, inclusive in FIELDS:
@@ -50,13 +55,20 @@ class ResearchSettings:
         RiskLimits(self.risk_fraction, self.max_position_fraction,
                    self.max_gross_fraction, self.max_total_risk_fraction)
         ExecutionConfig(slippage_bps=self.slippage_bps, fee_per_share=self.fee_per_share)
+        policy = EntryPolicy(self.weekdays, self.target_r)
+        if self.schema_version not in (LEGACY_SCHEMA, SCHEMA) or (self.schema_version == LEGACY_SCHEMA and not policy.is_reference):
+            raise ValueError('non-reference entry settings require the explicit v2 schema')
 
     @classmethod
     def from_dict(cls, value):
-        if not isinstance(value, dict) or set(value) != {'schema_version', *(f[0] for f in FIELDS)}:
-            raise ValueError('settings must contain exactly the supported schema fields')
-        if value['schema_version'] != SCHEMA:
+        if not isinstance(value, dict) or value.get('schema_version') not in (LEGACY_SCHEMA, SCHEMA):
             raise ValueError('unsupported research settings schema')
+        schema = value['schema_version']
+        required = {'schema_version', *(f[0] for f in FIELDS)}
+        if schema == SCHEMA:
+            required |= {'weekdays', 'target_r'}
+        if set(value) != required:
+            raise ValueError('settings must contain exactly the supported schema fields')
         numbers = {}
         for key, *_ in FIELDS:
             if not isinstance(value[key], str) or not 1 <= len(value[key]) <= 32:
@@ -65,14 +77,30 @@ class ResearchSettings:
                 numbers[key] = Decimal(value[key])
             except InvalidOperation:
                 raise ValueError(f'invalid supported setting: {key}') from None
-        return cls(**numbers)
+        if schema == SCHEMA:
+            policy = EntryPolicy.from_dict({'schema_version': 'orb-entry-policy-v1',
+                                             'weekdays': value['weekdays'], 'target_r': value['target_r']})
+            numbers.update(weekdays=policy.weekdays, target_r=policy.target_r)
+        return cls(**numbers, schema_version=schema)
 
     @classmethod
     def from_config(cls, config):
-        return cls.from_dict({'schema_version': SCHEMA, **{f[0]: config[f[0]] for f in FIELDS}})
+        values = {f[0]: config[f[0]] for f in FIELDS}
+        if 'entry_policy' in config:
+            policy = EntryPolicy.from_dict(config['entry_policy'])
+            values.update(target_r=canonical(policy.target_r), weekdays=list(policy.weekdays))
+            return cls.from_dict({'schema_version': SCHEMA, **values})
+        return cls.from_dict({'schema_version': LEGACY_SCHEMA, **values})
 
     def to_dict(self):
-        return {'schema_version': SCHEMA, **{k: canonical(v) for k, v in asdict(self).items()}}
+        values = {'schema_version': self.schema_version, **{f[0]: canonical(getattr(self, f[0])) for f in FIELDS}}
+        if self.schema_version == SCHEMA:
+            values.update(target_r=canonical(self.target_r), weekdays=list(self.weekdays))
+        return values
+
+    def current_values(self):
+        return {**self.to_dict(), 'schema_version': SCHEMA,
+                'target_r': canonical(self.target_r), 'weekdays': list(self.weekdays)}
 
     @property
     def fingerprint(self):
@@ -83,14 +111,19 @@ class ResearchSettings:
                     limits=RiskLimits(self.risk_fraction, self.max_position_fraction,
                                       self.max_gross_fraction, self.max_total_risk_fraction),
                     daily_loss_fraction=self.daily_loss_fraction,
-                    slippage_bps=self.slippage_bps, fee_per_share=self.fee_per_share)
+                    slippage_bps=self.slippage_bps, fee_per_share=self.fee_per_share,
+                    **({'entry_policy': EntryPolicy(self.weekdays, self.target_r)} if self.schema_version == SCHEMA else {}))
 
 
 def settings_contract():
-    return {'schema_version': SCHEMA, 'defaults': ResearchSettings().to_dict(),
-            'fields': [dict(key=k, label=label, minimum=lo, maximum=hi, zero_allowed=zero)
-                       for k, label, _, lo, hi, zero in FIELDS],
-            'unsupported': ['weekday selection', 'target R changes', 'opening-range/entry timing',
-                            'alternative stop policies', 'session-entry/concurrency caps'],
-            'notice': 'Research risk/cost controls only. Reference signal rules remain fixed. '
-                      'Caps block admissions; they do not guarantee losses or force trades.'}
+    return {'schema_version': SCHEMA, 'defaults': ResearchSettings(schema_version=SCHEMA).to_dict(),
+            'fields': [dict(key=k, label=label, minimum=lo, maximum=hi, zero_allowed=zero,
+                            minimum_inclusive=zero)
+                       for k, label, _, lo, hi, zero in FIELDS] +
+                      [dict(key='target_r', label='Planned target reward / risk (R)', minimum='0.25',
+                            maximum='10', zero_allowed=False, minimum_inclusive=True)],
+            'weekdays': [dict(value=i, label=d) for i, d in enumerate(('Mon', 'Tue', 'Wed', 'Thu', 'Fri'))],
+            'unsupported': ['opening-range/entry timing', 'alternative stop policies',
+                            'session-entry/concurrency caps'],
+            'notice': 'Research variants: weekdays gate entries only; target R is a price objective, '
+                      'not a guaranteed net payoff. Reference settings remain fixed.'}

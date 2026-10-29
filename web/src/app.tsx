@@ -543,7 +543,7 @@ function ImportDialog({
           </>
         )}
         <label>
-          Saved evaluation JSON (optional, v4/v5)
+          Saved evaluation JSON (optional, v4–v6)
           <input
             type="file"
             accept=".json"
@@ -1096,9 +1096,22 @@ function App() {
                             "Entry eligibility",
                             "Completed close > frozen high, before 11:00",
                           ],
-                          ["Stop / planned target", "Range midpoint / 2R"],
+                          [
+                            "Stop / planned target",
+                            `Range midpoint / ${config.entry_policy?.target_r || "2"}R`,
+                          ],
                           ["Candidate cap", "1 per symbol / session"],
-                          ["Schedule", "All eligible exchange weekdays"],
+                          [
+                            "Schedule",
+                            config.entry_policy
+                              ? config.entry_policy.weekdays
+                                  .map(
+                                    (d: number) =>
+                                      ["Mon", "Tue", "Wed", "Thu", "Fri"][d],
+                                  )
+                                  .join(" / ") + " (New York)"
+                              : "All eligible exchange weekdays",
+                          ],
                           [
                             "Session entry / concurrency caps",
                             "Not implemented as configurable controls",
