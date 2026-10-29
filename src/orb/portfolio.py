@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Iterable
 
+from orb.entry_capacity import EntryCaps, capacity_usage, validate_caps
 from orb.account import AccountLedger
 from orb.domain import Bar
 from orb.daily_loss import DailyLossGuard
@@ -49,7 +50,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                      slippage_bps: Decimal = Decimal("0"),
                      fee_per_share: Decimal = Decimal("0"),
                      daily_loss_fraction: Decimal = Decimal("0.02"),
-                     entry_policy: EntryPolicy | None = None) -> dict:
+                     entry_policy: EntryPolicy | None = None,
+                     entry_caps: EntryCaps | None = None) -> dict:
     """Apply simulated events to one shared account without future funding.
 
     Fill paths are quantity-independent under the existing no-market-impact
@@ -62,6 +64,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     A new position's same-open exit follows all entries at that timestamp.
     Unresolved positions retain resources across sessions and dataset end.
     """
+    caps = validate_caps(entry_caps)
+    filled_sessions = {}
     limits = limits or RiskLimits()
     _decimal("daily loss fraction", daily_loss_fraction, positive=True)
     if daily_loss_fraction > 1:
@@ -140,6 +144,7 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
             equity, marks, missing_marks = _marked_state(account, stamp, closes, entry_marks)
             snapshot = (account.marked_snapshot(stamp, marks)
                         if not missing_marks and equity > 0 else None)
+            capacity = capacity_usage(account.allocations, filled_sessions, day, caps) if caps else None
             if any(a.symbol == symbol and a.state in ("reserved", "open", "unresolved")
                    for a in account.allocations):
                 reason = "active_symbol_allocation"
@@ -156,6 +161,9 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
             elif guard.block_reason:
                 reason = guard.block_reason
                 decision = None
+            elif capacity and capacity["reason"]:
+                reason = capacity["reason"]
+                decision = None
             else:
                 decision = account.reserve(key, symbol, raw, path.stop,
                                            slippage_bps=slippage_bps,
@@ -164,6 +172,7 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
             quantity = decision.quantity if decision else 0
             if quantity:
                 account.fill(key, path.entry_price)
+                filled_sessions[key] = day
                 entry_marks[key] = MarketMark(path.entry_price, stamp, "entry_fill")
                 observe_loss(stamp, "after_fill")
                 records[key] = replace(path, quantity=quantity,
@@ -182,6 +191,7 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                           "admission_snapshot": asdict(snapshot) if snapshot is not None else None,
                           "marks": {s: asdict(m) for s, m in sorted(marks.items())},
                           "missing_mark_symbols": sorted(missing_marks),
+                          **({"entry_capacity": capacity} if caps else {}),
                           "daily_loss": guard.to_dict(),
                           "reason": reason, "account": account.to_dict()})
         elif kind == "exit" and records[key].quantity:
@@ -195,9 +205,13 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     for item in account.allocations:
         if item.state == "open":
             account.mark_unresolved(item.order_id)
-    return _json({"model_version": "portfolio-session-loss-v3" if policy.is_reference else "portfolio-entry-policy-v1",
+    return _json({"model_version": ("portfolio-entry-caps-v1" if caps else
+                                    "portfolio-session-loss-v3" if policy.is_reference else "portfolio-entry-policy-v1"),
+                  **({"entry_capacity_final": (capacity_usage(account.allocations, filled_sessions, max(guards), caps)
+                      if guards else None)} if caps else {}),
                   **({"entry_policy": policy.to_dict()} if not policy.is_reference else {}),
-                  "config": {"initial_cash": initial_cash, "limits": asdict(limits),
+                  "config": {**({"entry_caps": caps.to_dict()} if caps else {}),
+                             "initial_cash": initial_cash, "limits": asdict(limits),
                              "slippage_bps": slippage_bps, "fee_per_share": fee_per_share,
                              "daily_loss_fraction": daily_loss_fraction,
                              "daily_loss_policy": "fixed opening equity; loss/data-gap latch until next session",

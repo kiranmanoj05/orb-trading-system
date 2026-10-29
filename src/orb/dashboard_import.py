@@ -29,12 +29,12 @@ def _settings(report):
     manifest = report['manifest']
     schema = manifest.get('schema_version')
     base = manifest.get('base_schema_version') if schema in ('orb-evaluation-bundle-v1', 'orb-evaluation-profile-v1') else schema
-    if base not in ('orb-evaluation-v4', 'orb-evaluation-v5', 'orb-evaluation-v6'):
-        raise ValueError('supported saved evaluations are v4–v6 and their wrappers')
+    if base not in ('orb-evaluation-v4', 'orb-evaluation-v5', 'orb-evaluation-v6', 'orb-evaluation-v7'):
+        raise ValueError('supported saved evaluations are v4–v7 and their wrappers')
     if report.get('evaluation_id') != _digest(manifest):
         raise ValueError('saved evaluation manifest fingerprint mismatch')
     config = manifest.get('config')
-    expected_fields = CONFIG_FIELDS | ({'entry_policy'} if base == 'orb-evaluation-v6' else set())
+    expected_fields = CONFIG_FIELDS | ({'entry_policy'} if base in ('orb-evaluation-v6', 'orb-evaluation-v7') else set()) | ({'entry_caps'} if base == 'orb-evaluation-v7' else set())
     if not isinstance(config, dict) or set(config) != expected_fields:
         raise ValueError('unsupported saved evaluation configuration fields')
     if config['symbols'] != ['SPY', 'QQQ'] or config['bounds_source'] not in ('explicit', 'observed_dates'):
@@ -125,7 +125,8 @@ def import_dashboard(payload: dict) -> dict:
         from copy import deepcopy
         snapshot = deepcopy(saved['manifest']['profile'])
         manifest = evidence['manifest']
-        manifest['base_schema_version'] = ('orb-evaluation-v6' if 'entry_policy' in manifest['config'] else 'orb-evaluation-v5')
+        manifest['base_schema_version'] = ('orb-evaluation-v7' if 'entry_caps' in manifest['config'] else
+                                           'orb-evaluation-v6' if 'entry_policy' in manifest['config'] else 'orb-evaluation-v5')
         manifest['schema_version'] = 'orb-evaluation-profile-v1'
         manifest['profile'] = snapshot
         run['applied_settings']['preset'] = snapshot

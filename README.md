@@ -72,7 +72,8 @@ Existing runs keep their frozen settings. ORB MWF now provides an independent
 Monday/Wednesday/Friday entry schedule with otherwise identical baseline rules;
 custom presets support NY entry weekdays and planned target R. These are
 research variants, not claims of safer or improved returns. Imports/runs still
-clear on restart. Durable entry/concurrency counters remain upcoming work.
+clear on restart. Saved v3 variants now support entry/concurrency caps (1–2), backed by the
+shared engine and restart-safe offline coordinator. See [capacity semantics](docs/entry-capacity.md).
 See [preset controls and CLI](docs/research-presets.md) and
 [weekday/target variants](docs/trading-profile-variants.md).
 
@@ -108,8 +109,8 @@ remain snapshots: regenerate from source data to obtain the new semantics.
 
 Supported risk/cost presets now provide selection, edit/save/duplicate/reset,
 draft versus applied state and immutable saved versions. Weekday/target-R
-variants now reach the engine. Timing/stop variants and restart-safe
-entry/concurrency controls remain mandatory future scope. No setting is exposed as operative before its engine support exists.
+variants and session/concurrency caps now reach the engine. Remaining timing/stop
+variants and integrated paper recovery remain mandatory future scope. No setting is exposed as operative before its engine support exists.
 
 ## Baseline strategy
 

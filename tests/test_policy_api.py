@@ -12,7 +12,7 @@ pytest.importorskip('httpx')
 from fastapi.testclient import TestClient
 from orb.dashboard_api import create_app
 from orb.presets import PresetStore,MWF
-from orb.research_settings import ResearchSettings,SCHEMA
+from orb.research_settings import ResearchSettings,SCHEMA,CAPS_SCHEMA
 
 
 def settings(**changes):return {**ResearchSettings(schema_version=SCHEMA).to_dict(),**changes}
@@ -24,7 +24,7 @@ def test_api_contract_and_builtins_keep_reference_and_mwf_distinct(tmp_path):
         assert reference['settings']['schema_version']=='orb-research-settings-v1'
         assert mwf['settings']['weekdays']==[0,2,4]
         assert mwf['settings']['target_r']=='2'
-        assert data['contract']['schema_version']==SCHEMA
+        assert data['contract']['schema_version']==CAPS_SCHEMA
         assert data['contract']['defaults']['weekdays']==[0,1,2,3,4]
         assert c.post('/api/presets',json=dict(id=MWF,expected_version=1,name='overwrite',settings=mwf['settings'])).status_code==409
         source=c.get('/api/runs').json()[0]['id']
