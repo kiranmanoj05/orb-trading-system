@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
+const temp = await mkdtemp(join(tmpdir(), "orb-browser-"));
 const port = 8877,
   base = `http://127.0.0.1:${port}`;
 const server = spawn(
@@ -17,6 +20,10 @@ const server = spawn(
     String(port),
     "--web-dir",
     root + "/web/build",
+    "--research-db",
+    temp + "/research.sqlite",
+    "--preset-db",
+    temp + "/presets.sqlite",
   ],
   { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
 );
@@ -240,4 +247,6 @@ try {
 } finally {
   if (browser) await browser.close();
   server.kill();
+  await new Promise((r) => server.once("exit", r));
+  await rm(temp, { recursive: true, force: true });
 }

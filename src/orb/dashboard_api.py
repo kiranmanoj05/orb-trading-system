@@ -16,34 +16,47 @@ from orb.dashboard_import import MAX_BYTES, import_dashboard
 from orb.ingestion import _object, _invalid_constant
 from orb.presets import PresetStore, PresetConflict
 from orb.research_settings import settings_contract
-from orb.profile_runs import apply_preset
+from orb.research_store import ResearchStore, ResearchConflict, ResearchIntegrityError
 
 
-def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None):
-    """Single-process local inspection service; imported runs last this session.
+def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None):
+    """Local inspection service with an optional persistent research archive.
 
     Host validation prevents browser DNS rebinding. Cross-origin requests and
     non-JSON writes are refused; no CORS or remote filesystem access is exposed.
     Bind only to 127.0.0.1 through the supplied CLI; not a deployment/auth layer.
     """
     store = PresetStore(preset_db if preset_db is not None else ':memory:')
+    research = ResearchStore(research_db if research_db is not None else ':memory:',
+                             max_runs=100 if research_db is not None else 12)
     @asynccontextmanager
     async def lifespan(app):
+        try:
+            research.recover()
+        except ResearchConflict:
+            pass  # Another conforming local worker is still active.
         try:
             yield
         finally:
             store.close()
+            research.close()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.presets = store
+    app.state.research = research
 
-    runs = {}
+    @app.exception_handler(ResearchIntegrityError)
+    async def archive_error(request, exc):
+        return JSONResponse({"detail": "Research archive integrity check failed; preserve the database for review."}, status_code=503)
     if examples:
         for name, bars in scenarios().items():
             run = build_dashboard_run(bars, data_label='synthetic-dashboard-' + name)
             run['import_context'] = dict(kind='example', synthetic=True, recomputed=True,
                                         original_evaluation_id=None,
                                         notice='Invented acceptance example. Not market performance.')
-            runs[run['evaluation_id']] = run
+            source = 'symbol,start,open,high,low,close,volume\n' + ''.join(
+                ','.join(str(c[k]) for k in ('symbol','start','open','high','low','close','volume')) + '\n'
+                for c in run['candles'])
+            research.import_run(run, {'kind':'csv','source':source,'label':run['evidence']['manifest']['dataset']['label']})
     assets = Path(web_dir).resolve() if web_dir else None
     host = f'127.0.0.1:{port}'
     origin = f'http://{host}'
@@ -74,7 +87,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None):
             raise HTTPException(422, 'invalid JSON request') from None
 
     def preset_error(exc):
-        if isinstance(exc, PresetConflict):
+        if isinstance(exc, (PresetConflict, ResearchConflict)):
             raise HTTPException(409, str(exc)) from None
         if isinstance(exc, KeyError):
             raise HTTPException(404, 'preset version not found') from None
@@ -116,54 +129,103 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None):
         except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
             preset_error(exc)
 
-    @app.post('/api/runs/{run_id}/apply-preset', status_code=201)
-    async def rerun(run_id: str, request: Request):
+    async def queue_version(run_id, request):
         p = await read_json(request, 8192)
-        if run_id not in runs:
-            raise HTTPException(404, 'source run not in this server session')
-        if len(runs) >= 12:
-            raise HTTPException(409, 'session run limit reached; export and restart')
+        try:
+            research.get_run(run_id)
+        except KeyError:
+            raise HTTPException(404, 'source run not found') from None
         try:
             if not isinstance(p, dict) or set(p) != {'preset_id', 'version'}:
                 raise ValueError('exact saved version required')
             if type(p['version']) is not int or p['version'] < 1:
                 raise ValueError('exact saved version required')
             record = store.get(p['preset_id'], p['version'])
-            run = apply_preset(runs[run_id], record)
+            return research.enqueue_preset(run_id, record)
+        except ResearchIntegrityError:
+            raise
         except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
             preset_error(exc)
-        runs.setdefault(run['evaluation_id'], run)
-        return {'id': run['evaluation_id']}
+
+    @app.post('/api/runs/{run_id}/queue-preset', status_code=201)
+    async def queue_run(run_id: str, request: Request):
+        return await queue_version(run_id, request)
+
+    @app.post('/api/runs/{run_id}/apply-preset', status_code=201)
+    async def rerun(run_id: str, request: Request):
+        job = await queue_version(run_id, request)
+        try:
+            result = research.execute(job['id'])
+        except ResearchConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        if result['state'] != 'succeeded':
+            raise HTTPException(409, 'Research job did not complete. Inspect Research jobs; no run was published.')
+        return {'id':result['result_id']}
+
+    @app.get('/api/storage')
+    async def storage():
+        return {'durable':research.durable,'max_runs':research.max_runs,
+                'execution':'explicit local work-one; no background scheduler',
+                'order_submission':False}
+
+    async def empty_command(request):
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(422, 'job command does not accept a request body')
+
+    @app.get('/api/jobs')
+    async def jobs(): return research.list_jobs()
+
+    @app.post('/api/jobs/work-one')
+    async def work_one(request: Request):
+        await empty_command(request)
+        try: return research.execute()
+        except ResearchConflict as exc: raise HTTPException(409,str(exc)) from None
+
+    @app.post('/api/jobs/recover')
+    async def recover_jobs(request: Request):
+        await empty_command(request)
+        try: return {'interrupted':research.recover()}
+        except ResearchConflict as exc: raise HTTPException(409,str(exc)) from None
+
+    @app.post('/api/jobs/{job_id}/retry', status_code=201)
+    async def retry_job(job_id: str, request: Request):
+        await empty_command(request)
+        try: return research.retry(job_id)
+        except KeyError: raise HTTPException(404,'job not found') from None
+        except ResearchConflict as exc: raise HTTPException(409,str(exc)) from None
 
     @app.get('/api/runs')
     async def list_runs():
-        return [dict(id=key, label=r['evidence']['manifest']['dataset']['label'],
+        return [dict(id=r['evaluation_id'], label=r['evidence']['manifest']['dataset']['label'],
                      complete=r['metrics_eligible'], synthetic=r['import_context'].get('synthetic'),
                      preset=r['applied_settings']['preset'],
                      start=r['applied_settings']['values']['start_session'],
-                     end=r['applied_settings']['values']['end_session']) for key, r in runs.items()]
+                     end=r['applied_settings']['values']['end_session']) for r in research.list_runs()]
 
     @app.get('/api/runs/{run_id}')
     async def get_run(run_id: str):
-        if run_id not in runs:
-            raise HTTPException(404, 'run not found in this server session')
-        return runs[run_id]
+        try: return research.get_run(run_id)
+        except KeyError: raise HTTPException(404,'research run not found') from None
+
+    @app.get('/api/runs/{run_id}/source')
+    async def get_source(run_id: str):
+        try: return research.source(run_id)
+        except KeyError: raise HTTPException(404,'research source not found') from None
 
     @app.post('/api/import', status_code=201)
     async def import_run(request: Request):
         payload = await read_json(request)
-        if len(runs) >= 12:
-            raise HTTPException(409, 'session run limit reached; restart to clear local imports')
         try:
             run = import_dashboard(payload)
         except (ValueError, InvalidOperation, TypeError, KeyError, OverflowError, RecursionError):
-            # Do not reflect user file contents, malformed prices or paths.
             raise HTTPException(422, 'Import rejected. Check source format, report fingerprint/configuration, '
                                 'matching candles and the 31-day / 20000-bar limits.') from None
-        # There are no awaits between validation and insert; one process owns
-        # the session. No durable job or multiworker safety is claimed.
-        runs.setdefault(run['evaluation_id'], run)
-        return {'id': run['evaluation_id']}
+        try:
+            job = research.import_run(run, payload)
+        except ResearchConflict as exc:
+            raise HTTPException(409,str(exc)) from None
+        return {'id':job['result_id']}
 
     @app.get('/')
     async def index():
@@ -188,11 +250,12 @@ def main():
     parser.add_argument('--examples', action='store_true', help='load three explicitly synthetic examples')
     parser.add_argument('--web-dir', type=Path, default=Path('web/build'))
     parser.add_argument('--preset-db', type=Path, default=Path('results/dashboard-presets.sqlite'))
+    parser.add_argument('--research-db', type=Path, default=Path('results/dashboard-research.sqlite'))
     args = parser.parse_args()
     if not (args.web_dir / 'index.html').is_file():
         parser.error('frontend missing: run npm ci && npm run build in web/ first')
     import uvicorn
-    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db),
+    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db),
                 host='127.0.0.1', port=args.port, workers=1, access_log=False)
 
 

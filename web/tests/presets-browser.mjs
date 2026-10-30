@@ -20,6 +20,8 @@ const server = spawn(
     root + "/web/build",
     "--preset-db",
     temp + "/presets.sqlite",
+    "--research-db",
+    temp + "/research.sqlite",
   ],
   { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
 );
