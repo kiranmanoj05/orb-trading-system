@@ -23,12 +23,12 @@ A transient preset-load error has a working reload path.
 
 ## Shared contract and limits
 
-`ResearchSettings` v2 is authoritative for the new preset CLI, API/editor and saved
-report imports. Settings JSON has exactly these string fields:
+`ResearchSettings` v3 is authoritative for the new preset CLI, API/editor and saved
+report imports. Settings JSON has exactly these fields (decimal/integer values are strings; weekdays is an integer array):
 
 | Field | Unit / supported range |
 | --- | --- |
-| schema_version | `orb-research-settings-v2` (v1 retained for old records) |
+| schema_version | `orb-research-settings-v3` (v1/v2 retained for old records) |
 | initial_cash | USD, positive, at most 1e12 |
 | risk_fraction | Equity fraction, greater than 0 and at most 1 |
 | max_position_fraction | Allocation fraction, greater than 0 and at most 1 |
@@ -38,6 +38,8 @@ report imports. Settings JSON has exactly these string fields:
 | slippage_bps | Basis points per market side, 0–1000 |
 | fee_per_share | USD/share/side, 0–1000 |
 | target_r | Decimal string, planned price reward/risk, 0.25–10 |
+| max_session_entries | Integer string `1` or `2`; filled-entry cap, pending holds a slot |
+| max_concurrent_positions | Integer string `1` or `2`; pending/open/unresolved slots |
 | weekdays | Nonempty ordered unique JSON integers 0–4 (Mon–Fri), NY session dates |
 
 `0.005` means **0.5%**, not 0.005%. Exact decimal strings avoid silently using
@@ -56,9 +58,9 @@ Alpaca execution costs.
 The reference remains SPY/QQQ long-only, all eligible NY exchange weekdays,
 [09:30,09:45) range, completed close strictly above frozen high before 11:00,
 midpoint stop, planned 2R and one candidate/symbol/session. The independently
-defined ORB MWF changes only weekdays to Monday/Wednesday/Friday. Custom v2
-versions can change weekdays and target R. Range/entry timing, alternative stops
-and configurable session/concurrency caps remain explicitly unavailable. Customisation is not evidence of economic improvement.
+defined ORB MWF changes only weekdays to Monday/Wednesday/Friday. Custom v3
+versions can change weekdays, target R and session/concurrency caps. Range/entry
+timing and alternative stops remain explicitly unavailable. Customisation is not evidence of economic improvement.
 
 ## Persistence and identity
 
@@ -88,8 +90,9 @@ source; it does not install a mutable preset in the database.
 
 **Presets persist; run imports/evaluations currently do not.** A server restart
 clears the in-memory run list. Preserve sources and export run evidence. Durable
-research jobs and account counters are separate upcoming work. This store is
-not proof that pending/partial-fill entry limits are restart safe.
+research jobs remain upcoming work. Account-wide counters are now reconstructed
+from the separate offline coordinator transaction log; this preset store is not
+the account journal. External partial fills remain reconciliation-gated.
 
 ## CLI
 
@@ -129,9 +132,8 @@ Existing loopback Host/Origin, JSON, content-policy and size guards apply. Prese
 mutations have an 8 KiB limit. No order, paper activation, news or credential
 endpoint is added. Public hosting still requires separate design/authorisation.
 
-Next: restart-safe entry/concurrency limits
-with pending/partial-fill semantics, then persistent research comparisons and
-holdouts. Preserve the fixed reference and the distinction between software
+Next: durable historical jobs and comparisons/holdouts, followed by remaining
+partial-fill account/recovery integration before enabling paper controls. Preserve the fixed reference and the distinction between software
 verification, historical economic evidence and paper observation.
 
 
@@ -139,8 +141,21 @@ verification, historical economic evidence and paper observation.
 
 Existing v1 rows, hashes and saved snapshots retain their eight original decimal
 fields exactly. They continue to mean all weekdays and 2R. The editor expands a
-v1 record into an explicit v2 draft using those semantics; a user save appends a
-v2 version and never rewrites the old row. Loading alone does not migrate data.
+v1 record into an explicit v3 draft using those semantics; a user save appends a
+v3 version and never rewrites the old row. Loading alone does not migrate data.
 The built-in Reference stays at its original v1 identity, while ORB MWF is a
 protected v2 preset. Their risk/cost/stop/entry defaults match. Applying explicit
 v2 reference values still uses the unchanged baseline behaviour.
+
+
+## Session-entry and concurrency limits
+
+See [entry capacity and restart semantics](entry-capacity.md). v3 freezes both
+limits into new runs; it never rewrites v1/v2 snapshots. Both controls are bounded
+to 1–2 for the current two-symbol, one-candidate/symbol/session implementation.
+Pending reservations hold slots, first modeled fills consume one session entry,
+and exits release concurrency only. A cap never creates a trade or re-arms a
+consumed candidate. Existing timing, costs, data/loss gates and tie ordering
+remain authoritative. The durable offline coordinator serialises and reconstructs
+these counters with cash/risk/intents; historical dashboard runs remain in memory.
+No paper execution or external partial-fill resource release is enabled.

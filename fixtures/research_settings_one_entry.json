@@ -1,0 +1,21 @@
+{
+  "schema_version": "orb-research-settings-v3",
+  "initial_cash": "10000",
+  "risk_fraction": "0.005",
+  "max_position_fraction": "0.25",
+  "max_gross_fraction": "1",
+  "max_total_risk_fraction": "0.01",
+  "daily_loss_fraction": "0.02",
+  "slippage_bps": "0",
+  "fee_per_share": "0",
+  "target_r": "2",
+  "weekdays": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "max_session_entries": "1",
+  "max_concurrent_positions": "1"
+}

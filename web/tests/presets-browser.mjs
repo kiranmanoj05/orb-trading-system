@@ -396,6 +396,146 @@ try {
       fullPage: true,
     });
   console.log("PASS empty schedule validation and responsive policy controls");
+  // Invented simultaneous SPY/QQQ source: exercise settings via the real UI.
+  const spyBars = old.candles.filter((b) => b.symbol === "SPY");
+  const bars = [
+    ...spyBars,
+    ...spyBars.map((b) => ({ ...b, symbol: "QQQ" })),
+  ].sort(
+    (a, b) =>
+      a.start.localeCompare(b.start) || a.symbol.localeCompare(b.symbol),
+  );
+  const csv =
+    "symbol,start,open,high,low,close,volume\n" +
+    bars
+      .map((b) =>
+        [b.symbol, b.start, b.open, b.high, b.low, b.close, b.volume].join(","),
+      )
+      .join("\n") +
+    "\n";
+  const imported = await fetch(base + "/api/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kind: "csv",
+      source: csv,
+      label: "synthetic capacity check",
+    }),
+  });
+  assert.equal(imported.status, 201);
+  const capacitySource = (await imported.json()).id;
+  await page.reload();
+  await page.getByText("Cash at end", { exact: true }).waitFor();
+  await page
+    .getByLabel("Selected run", { exact: true })
+    .selectOption(capacitySource);
+  await page
+    .getByRole("navigation")
+    .getByRole("button", { name: /Applied settings/ })
+    .click();
+  await page
+    .getByLabel("Saved preset", { exact: true })
+    .selectOption("orb-reference");
+  const entryLimit = page.getByLabel(
+    "Maximum filled entries per session (cap)",
+    { exact: true },
+  );
+  const concurrentLimit = page.getByLabel(
+    "Maximum concurrent positions (pending included)",
+    { exact: true },
+  );
+  assert(await entryLimit.isDisabled());
+  await page
+    .getByRole("button", { name: "Duplicate saved preset", exact: true })
+    .click();
+  await page.waitForFunction(
+    () => !document.querySelector("fieldset").disabled,
+  );
+  await page.getByLabel("Preset name", { exact: true }).fill("One concurrent");
+  await concurrentLimit.fill("1");
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page
+    .getByText("Saved One concurrent v2. Existing runs unchanged.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("button", {
+      name: "Apply saved version to new run",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("heading", { name: "One concurrent · v2", exact: true })
+    .waitFor();
+  const cappedId = await page
+    .getByLabel("Selected run", { exact: true })
+    .inputValue();
+  const cappedRun = await (await fetch(base + "/api/runs/" + cappedId)).json();
+  assert.equal(
+    cappedRun.evidence.summary.trade_reasons.concurrent_position_limit,
+    1,
+  );
+  assert.equal(
+    cappedRun.applied_settings.preset.settings.max_concurrent_positions,
+    "1",
+  );
+  assert.match(
+    await page.locator("main").textContent(),
+    /2 filled \/ session; 1 concurrent/,
+  );
+  console.log(
+    "PASS saved concurrency cap rejects actual simultaneous candidate and displays applied limits",
+  );
+  await entryLimit.fill("1.5");
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page.getByRole("alert").waitFor();
+  assert.equal(
+    await page
+      .getByLabel("Inspect saved version", { exact: true })
+      .inputValue(),
+    "2",
+  );
+  await page.getByRole("button", { name: "Reset draft", exact: true }).click();
+  await entryLimit.fill("1");
+  await concurrentLimit.fill("2");
+  await page
+    .getByRole("button", { name: "Save new version", exact: true })
+    .click();
+  await page
+    .getByText("Saved One concurrent v3. Existing runs unchanged.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByRole("button", {
+      name: "Apply saved version to new run",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("heading", { name: "One concurrent · v3", exact: true })
+    .waitFor();
+  const countId = await page
+    .getByLabel("Selected run", { exact: true })
+    .inputValue();
+  const countRun = await (await fetch(base + "/api/runs/" + countId)).json();
+  assert.equal(countRun.evidence.summary.trade_reasons.session_entry_limit, 1);
+  assert.deepEqual(
+    await (await fetch(base + "/api/runs/" + cappedId)).json(),
+    cappedRun,
+  );
+  assert.equal(
+    countRun.evidence.manifest.base_schema_version,
+    "orb-evaluation-v7",
+  );
+  console.log(
+    "PASS integer validation, reset and session cap application preserve earlier run versions",
+  );
   assert.deepEqual(errors, []);
   console.log("PASS preset reflow, reduced motion and no browser errors");
 } finally {

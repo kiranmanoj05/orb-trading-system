@@ -129,8 +129,9 @@ for that independent research step.
   Complete the remaining strategy/schedule controls and durable caps before
   calling the broader preset acceptance criteria complete.
 - NY weekday variants and target-R settings are now implemented with a fixed
-  reference (trading-profile-variants.md). Next: durable entry/concurrency counters and pending/partial-fill semantics before
-  exposing those controls. Schedule gates entries, never position management.
+  reference (trading-profile-variants.md). v3 now adds entry/concurrency controls and durable offline counters
+  (entry-capacity.md); remaining broker partial-fill integration is required
+  before exposing paper submission controls. Schedule gates entries, never position management.
 - Durable research run/job storage, comparisons/cost stress and chronological
   holdouts. No automated chasing of yesterday's best parameters.
 - Read-only paper snapshot integration, then recovery/reconciliation prerequisites

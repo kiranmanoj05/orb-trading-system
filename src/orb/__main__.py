@@ -20,6 +20,7 @@ from orb.evaluation import evaluate, render_report
 from orb.ingestion import evaluate_bundle, import_capture
 from orb.acquisition import FetchLimits, acquire_bundle, acquisition_plan
 from orb.journal import IntentJournal, recovery_demo
+from orb.entry_capacity import EntryCaps
 from orb.coordinator import CoordinatorConfig, DurableCoordinator, coordinator_demo
 from orb.reconciliation import ReconciliationLedger, reconciliation_demo
 from orb.paper_snapshot import (PaperSnapshotError, capture_paper_snapshot,
@@ -65,6 +66,8 @@ def main() -> None:
                           ("risk-fraction", "0.005"), ("max-position-fraction", "0.25"),
                           ("max-gross-fraction", "1"), ("max-total-risk-fraction", "0.01")):
         coordinator_inspect.add_argument(f"--{name}", type=Decimal, default=Decimal(default))
+    coordinator_inspect.add_argument("--max-session-entries", type=int)
+    coordinator_inspect.add_argument("--max-concurrent-positions", type=int)
     reconciliation = commands.add_parser(
         "reconciliation-demo", help="new synthetic partial-fill/exit recovery exercise; no broker")
     reconciliation.add_argument("--db", type=Path, required=True)
@@ -163,7 +166,10 @@ def main() -> None:
             if args.command == "coordinator-demo":
                 result = coordinator_demo(args.db)
             else:
-                config = CoordinatorConfig(initial_cash=args.initial_cash, daily_loss_fraction=args.daily_loss_fraction,
+                if (args.max_session_entries is None) != (args.max_concurrent_positions is None):
+                    raise ValueError("provide both entry and concurrency caps, or neither for legacy configuration")
+                config = CoordinatorConfig(entry_caps=(EntryCaps(args.max_session_entries, args.max_concurrent_positions)
+                    if args.max_session_entries is not None else None), initial_cash=args.initial_cash, daily_loss_fraction=args.daily_loss_fraction,
                     slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share,
                     limits=RiskLimits(args.risk_fraction, args.max_position_fraction,
                                       args.max_gross_fraction, args.max_total_risk_fraction))

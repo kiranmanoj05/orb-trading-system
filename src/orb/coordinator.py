@@ -13,6 +13,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from orb.entry_capacity import EntryCaps, capacity_usage, validate_caps
 from orb.account import AccountLedger
 from orb.daily_loss import DailyLossGuard
 from orb.domain import BreakoutSignal
@@ -44,8 +45,10 @@ class CoordinatorConfig:
     daily_loss_fraction: Decimal = Decimal("0.02")
     slippage_bps: Decimal = Decimal("0")
     fee_per_share: Decimal = Decimal("0")
+    entry_caps: EntryCaps | None = None
 
     def __post_init__(self):
+        validate_caps(self.entry_caps)
         if not isinstance(self.limits, RiskLimits):
             raise JournalError("coordinator limits must be validated RiskLimits")
         with localcontext(Context(prec=28)):
@@ -61,7 +64,7 @@ def _model_id():
     from importlib.metadata import version
     root = Path(__file__).parent
     names = ("account.py", "risk.py", "daily_loss.py", "session.py", "breakout.py",
-             "domain.py", "journal.py", "coordinator.py")
+             "domain.py", "journal.py", "coordinator.py", "entry_capacity.py")
     h = sha256()
     for name in names:
         h.update(name.encode() + b"\0" + (root / name).read_bytes())
@@ -77,6 +80,7 @@ class _State:
         self.marks = {}
         self.at = self.tick_at = None
         self.attempts = {}
+        self.filled_sessions = {}
 
 
 def _marks(evidence, at):
@@ -114,7 +118,10 @@ class DurableCoordinator:
 
     def __init__(self, path: Path, account_scope: str, config: CoordinatorConfig | None = None, *, create=True):
         self.config = config or CoordinatorConfig()
-        self.config_json = _json(asdict(self.config))
+        config_values = asdict(self.config)
+        if self.config.entry_caps is None:
+            config_values.pop("entry_caps")  # Preserve the uncapped configuration identity.
+        self.config_json = _json(config_values)
         self.config_id = sha256(self.config_json.encode()).hexdigest()
         self.model_id = _model_id()
         self.journal = IntentJournal(path, account_scope, create=create)
@@ -228,6 +235,11 @@ class DurableCoordinator:
             elif any(a.symbol == signal.symbol and a.state in ("reserved", "open", "unresolved")
                      for a in state.account.allocations):
                 reason = "active_symbol"
+            capacity = (capacity_usage(state.account.allocations, state.filled_sessions,
+                                       state.guard.session.day, self.config.entry_caps)
+                        if self.config.entry_caps else None)
+            if reason is None and capacity:
+                reason = capacity["reason"]
             if reason is None:
                 decision = state.account.reserve(signal.signal_id, signal.symbol, signal.entry_reference, signal.stop,
                     slippage_bps=self.config.slippage_bps, fee_per_share=self.config.fee_per_share,
@@ -238,6 +250,8 @@ class DurableCoordinator:
                                       if decision.quantity else None)}
             else:
                 outcome = {"quantity": 0, "reason": reason, "intent": None, "decision": None}
+            if capacity is not None:
+                outcome["entry_capacity"] = capacity
             state.attempts[key] = (command["signal"], outcome)
             return outcome
         order_id = command["signal_id"]
@@ -246,6 +260,7 @@ class DurableCoordinator:
         elif op == "fill":
             price = Decimal(command["price"])
             state.account.fill(order_id, price)
+            state.filled_sessions[order_id] = state.guard.session.day
             allocation = next(a for a in state.account.allocations if a.order_id == order_id)
             state.marks[allocation.symbol] = MarketMark(price, at, "entry_fill")
         elif op == "close":
@@ -328,13 +343,15 @@ class DurableCoordinator:
     def snapshot(self):
         with localcontext(Context(prec=28)), self.journal._transaction():
             state = self._restore()
-            return _plain({"model": "durable-offline-coordinator-v1", "account_scope": self.journal.account_scope,
+            return _plain({"model": ("durable-offline-entry-caps-v1" if self.config.entry_caps else "durable-offline-coordinator-v1"), "account_scope": self.journal.account_scope,
                 "config_id": self.config_id, "account": state.account.to_dict(),
                 "model_id": self.model_id,
                 "daily_loss": state.guard.to_dict() if state.guard else None, "at": state.at,
                 "attempts": [{"session": k[0], "symbol": k[1], "outcome": v[1]} for k,v in sorted(state.attempts.items())],
                 "reconciliation_required": self._gate(state), "broker_reconciled": False,
                 "paper_execution_enabled": False, "modeled_account_restored": True,
+                **({"entry_capacity": capacity_usage(state.account.allocations, state.filled_sessions,
+                    state.guard.session.day, self.config.entry_caps)} if self.config.entry_caps and state.guard else {}),
                 "events": self._db.execute("SELECT COUNT(*) FROM coordinator_events").fetchone()[0]})
 
     def recover(self, at: datetime):

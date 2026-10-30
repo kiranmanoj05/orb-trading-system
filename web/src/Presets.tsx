@@ -4,7 +4,9 @@ type Settings = Record<string, string | number[]>;
 function editable(s: Settings): Settings {
   return {
     ...s,
-    schema_version: "orb-research-settings-v2",
+    schema_version: "orb-research-settings-v3",
+    max_session_entries: s.max_session_entries || "2",
+    max_concurrent_positions: s.max_concurrent_positions || "2",
     target_r: s.target_r || "2",
     weekdays: Array.isArray(s.weekdays) ? [...s.weekdays] : [0, 1, 2, 3, 4],
   };
@@ -26,6 +28,7 @@ type Contract = {
     maximum: string;
     zero_allowed: boolean;
     minimum_inclusive?: boolean;
+    integer?: boolean;
   }[];
   weekdays: { value: number; label: string }[];
   unsupported: string[];
@@ -233,7 +236,7 @@ export default function Presets({
                 {f.label}
                 <input
                   aria-label={f.label}
-                  inputMode="decimal"
+                  inputMode={f.integer ? "numeric" : "decimal"}
                   value={
                     typeof draft[f.key] === "string" ? String(draft[f.key]) : ""
                   }
@@ -374,7 +377,10 @@ export default function Presets({
             <p>
               Presets persist across server restarts when a database is
               configured. Historical runs currently remain session-local. This
-              does not persist trading counters or activate paper execution.
+              does not resume historical runs or activate paper execution. The
+              offline coordinator persists admission counters in its separate
+              account journal; external partial fills still require
+              reconciliation.
             </p>
           </details>
         </>

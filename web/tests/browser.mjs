@@ -166,17 +166,32 @@ try {
     await fetch(base + "/api/runs/" + listing[0].id)
   ).json();
   await page
-    .getByLabel("Saved evaluation JSON (optional, v4–v6)")
+    .getByLabel("Saved evaluation JSON (optional, v4–v7)")
     .setInputFiles({
       name: "mismatch.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(report.evidence)),
     });
+  if (process.env.ORB_IMPORT_DIAGNOSTICS) {
+    console.log(
+      await page
+        .getByRole("button", { name: "Validate & import" })
+        .evaluate((e) => ({
+          rect: e.getBoundingClientRect().toJSON(),
+          visible: getComputedStyle(e).visibility,
+          dialog: e.closest("dialog").open,
+        })),
+    );
+    await page.screenshot({
+      path: process.env.ORB_IMPORT_DIAGNOSTICS,
+      fullPage: true,
+    });
+  }
   await page.getByRole("button", { name: "Validate & import" }).click();
   await page.getByRole("alert").waitFor();
   assert.equal((await (await fetch(base + "/api/runs")).json()).length, 3);
   await page
-    .getByLabel("Saved evaluation JSON (optional, v4–v6)")
+    .getByLabel("Saved evaluation JSON (optional, v4–v7)")
     .setInputFiles([]);
   await page.getByRole("button", { name: "Validate & import" }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });

@@ -11,6 +11,7 @@ from pathlib import Path
 import platform
 from typing import Iterable
 
+from orb.entry_capacity import EntryCaps, validate_caps
 from orb.breakout import BreakoutDetector
 from orb.domain import Bar
 from orb.portfolio import replay_portfolio
@@ -43,7 +44,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
              daily_loss_fraction: Decimal = Decimal("0.02"),
              data_label: str = "unspecified",
              start_session: date | None = None, end_session: date | None = None,
-             entry_policy: EntryPolicy | None = None) -> dict:
+             entry_policy: EntryPolicy | None = None,
+             entry_caps: EntryCaps | None = None) -> dict:
     """Evaluate the fixed SPY/QQQ baseline; never treat absent bars as no trades.
 
     Without explicit date bounds, coverage spans observed New York dates only.
@@ -87,10 +89,11 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     limits = RiskLimits(*(Decimal(_decimal(getattr(limits, name))) for name in
                           ("risk_fraction", "max_position_fraction", "max_gross_fraction",
                            "max_total_risk_fraction")))
+    caps = validate_caps(entry_caps)
     policy = resolve_policy(entry_policy)
     result = replay_portfolio(canonical, initial_cash, limits,
                               slippage_bps=slippage_bps, fee_per_share=fee_per_share,
-                              daily_loss_fraction=daily_loss_fraction, entry_policy=policy)
+                              daily_loss_fraction=daily_loss_fraction, entry_policy=policy, entry_caps=caps)
     dataset_rows = [[b.symbol, b.start.isoformat(),
                      *(_decimal(p) for p in (b.open, b.high, b.low, b.close)), b.volume]
                     for b in canonical]
@@ -123,7 +126,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
     valuation = market_valuation(canonical, result, coverage)
     manifest = {
-        "schema_version": "orb-evaluation-v5" if policy.is_reference else "orb-evaluation-v6",
+        "schema_version": ("orb-evaluation-v7" if caps else
+                           "orb-evaluation-v5" if policy.is_reference else "orb-evaluation-v6"),
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
@@ -139,7 +143,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                    "start_session": str(start), "end_session": str(end),
                    "bounds_source": "explicit" if explicit else "observed_dates",
                    "symbols": ["SPY", "QQQ"],
-                   **({"entry_policy": policy.to_dict()} if not policy.is_reference else {})},
+                   **({"entry_policy": policy.to_dict()} if caps or not policy.is_reference else {}),
+                   **({"entry_caps": caps.to_dict()} if caps else {})},
         "engine": {"source_sha256": engine_fingerprint(),
                    "strategy_version": policy.strategy_version,
                    "portfolio_model": result["model_version"],
@@ -239,4 +244,10 @@ def render_report(result: dict) -> str:
                   'New York eligible weekdays: ' + ', '.join(days[d] for d in policy['weekdays']),
                   f"Planned price reward/risk: {policy['target_r']}R; not a net payoff guarantee.",
                   'Schedule gates new candidates only; all valuation/coverage/account observations remain.']
+    caps = m["config"].get("entry_caps")
+    if caps:
+        lines += ["", "## Entry capacity", "",
+                  f"Maximum filled entries per NY session: {caps['max_session_entries']} (cap, never quota)",
+                  f"Maximum concurrent positions: {caps['max_concurrent_positions']} (pending included)",
+                  "Pending reservations hold entry slots; an exit releases concurrency, not the session entry count."]
     return "\n".join(lines) + "\n"

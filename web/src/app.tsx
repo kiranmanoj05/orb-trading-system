@@ -543,7 +543,7 @@ function ImportDialog({
           </>
         )}
         <label>
-          Saved evaluation JSON (optional, v4–v6)
+          Saved evaluation JSON (optional, v4–v7)
           <input
             type="file"
             accept=".json"
@@ -973,6 +973,32 @@ function App() {
                                 </p>
                               </div>
                             ))}
+                          {decision.events
+                            .filter((v: Row) => v.entry_capacity)
+                            .map((v: Row) => (
+                              <div className="inset" key={`capacity-${v.at}`}>
+                                <strong>
+                                  Entry capacity before this decision
+                                </strong>
+                                <Pair
+                                  name="Filled / pending entries"
+                                  value={`${v.entry_capacity.filled_entries} / ${v.entry_capacity.pending_entry_slots}`}
+                                />
+                                <Pair
+                                  name="Session slots used / cap"
+                                  value={`${v.entry_capacity.session_slots_used} / ${v.entry_capacity.limits.max_session_entries}`}
+                                />
+                                <Pair
+                                  name="Concurrent slots used / cap"
+                                  value={`${v.entry_capacity.concurrent_slots_used} / ${v.entry_capacity.limits.max_concurrent_positions}`}
+                                />
+                                <p>
+                                  Exits release concurrency. Filled entries
+                                  still count for this New York session. Limits
+                                  never force trades.
+                                </p>
+                              </div>
+                            ))}
                           <details>
                             <summary>Exact events & availability times</summary>
                             <pre>{JSON.stringify(decision, null, 2)}</pre>
@@ -1114,7 +1140,9 @@ function App() {
                           ],
                           [
                             "Session entry / concurrency caps",
-                            "Not implemented as configurable controls",
+                            config.entry_caps
+                              ? `${config.entry_caps.max_session_entries} filled / session; ${config.entry_caps.max_concurrent_positions} concurrent (pending included)`
+                              : "Legacy reference: up to 2 candidates, one per symbol",
                           ],
                         ].map(([name, value]) => (
                           <Pair key={name} name={name} value={value} />

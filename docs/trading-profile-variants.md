@@ -62,8 +62,9 @@ choosing a real trading parameter.
 ResearchSettings v1 remains an exact eight-field risk/cost snapshot with implicit
 all weekdays and 2R. Its stored rows, hashes and Reference identity do not change.
 ResearchSettings v2 requires those fields **plus** explicit target_r/weekdays.
-The UI projects v1 meaning into an editable v2 draft. Only a deliberate save
-appends a v2 version; no prior row/run is migrated or reinterpreted. Old versions
+The UI now projects v1/v2 meaning into an editable v3 draft with explicit
+entry/concurrency caps (see entry-capacity.md). Only a deliberate save
+appends a v3 version; no prior row/run is migrated or reinterpreted. Old versions
 remain inspectable and usable.
 
 The existing preset SQLite schema needs no migration. ORB Reference is protected
@@ -105,7 +106,7 @@ comparisons need permitted multi-period data, cost sensitivity, paired session
 outcomes, chronological holdouts and a log of every tried variant. No performance
 ranking or automatic strategy switching is introduced here.
 
-Next: restart-safe session-entry/concurrency limits with pending/partial-fill
-semantics, followed by durable research jobs/comparisons and remaining paper
-recovery dependencies. Range/entry timing, alternative stop policies, news and
+Entry/concurrency controls and durable offline counters now exist; see
+[capacity semantics](entry-capacity.md). Next: durable research jobs/comparisons
+and remaining paper partial-fill/recovery integration. Range/entry timing, alternative stop policies, news and
 paper controls are not made operational by this increment.
