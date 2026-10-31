@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from orb.dashboard import build_dashboard_run
-from orb.dashboard_fixtures import scenarios
+from orb.dashboard_fixtures import scenarios, comparison_scenario
 from orb.dashboard_import import MAX_BYTES, import_dashboard
 from orb.ingestion import _object, _invalid_constant
 from orb.presets import PresetStore, PresetConflict
@@ -19,7 +19,7 @@ from orb.research_settings import settings_contract
 from orb.research_store import ResearchStore, ResearchConflict, ResearchIntegrityError
 
 
-def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None):
+def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None, comparison_example=False):
     """Local inspection service with an optional persistent research archive.
 
     Host validation prevents browser DNS rebinding. Cross-origin requests and
@@ -47,8 +47,11 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
     @app.exception_handler(ResearchIntegrityError)
     async def archive_error(request, exc):
         return JSONResponse({"detail": "Research archive integrity check failed; preserve the database for review."}, status_code=503)
-    if examples:
-        for name, bars in scenarios().items():
+    example_sources = scenarios() if examples else {}
+    if comparison_example:
+        example_sources["comparison_three_sessions"] = comparison_scenario()
+    if example_sources:
+        for name, bars in example_sources.items():
             run = build_dashboard_run(bars, data_label='synthetic-dashboard-' + name)
             run['import_context'] = dict(kind='example', synthetic=True, recomputed=True,
                                         original_evaluation_id=None,
@@ -162,6 +165,40 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
             raise HTTPException(409, 'Research job did not complete. Inspect Research jobs; no run was published.')
         return {'id':result['result_id']}
 
+    @app.post('/api/runs/{run_id}/queue-comparison', status_code=201)
+    async def queue_comparison(run_id: str, request: Request):
+        payload=await read_json(request,32768)
+        try:
+            if not isinstance(payload,dict) or set(payload)!={'name','split_session','presets','costs'}:
+                raise ValueError('unsupported comparison request')
+            if not isinstance(payload['presets'],list) or not 2<=len(payload['presets'])<=3:
+                raise ValueError('two or three exact preset versions required')
+            snapshots=[]
+            for p in payload['presets']:
+                if not isinstance(p,dict) or set(p)!={'id','version'} or type(p['version']) is not int:
+                    raise ValueError('exact saved preset version required')
+                snapshots.append(store.get(p['id'],p['version']))
+            from orb.comparison import SCHEMA
+            return research.enqueue_comparison(run_id,{'schema_version':SCHEMA,**payload,'presets':snapshots})
+        except ResearchIntegrityError: raise
+        except (ValueError,KeyError,TypeError,sqlite3.Error) as exc: preset_error(exc)
+
+    @app.get('/api/comparisons')
+    async def comparison_list():
+        return [dict(id=c['comparison_id'],name=c['manifest']['plan']['name'],
+                     parent_evaluation_id=c['manifest']['parent_evaluation_id']) for c in research.list_comparisons()]
+
+    @app.get('/api/comparisons/{identity}')
+    async def comparison_get(identity: str):
+        try: return research.get_comparison(identity)
+        except KeyError: raise HTTPException(404,'comparison not found') from None
+
+    @app.get('/api/comparisons/{identity}/report')
+    async def comparison_report(identity: str):
+        from orb.comparison import render_comparison
+        try: return Response(render_comparison(research.get_comparison(identity)),media_type='text/markdown')
+        except KeyError: raise HTTPException(404,'comparison not found') from None
+
     @app.get('/api/storage')
     async def storage():
         return {'durable':research.durable,'max_runs':research.max_runs,
@@ -250,12 +287,13 @@ def main():
     parser.add_argument('--examples', action='store_true', help='load three explicitly synthetic examples')
     parser.add_argument('--web-dir', type=Path, default=Path('web/build'))
     parser.add_argument('--preset-db', type=Path, default=Path('results/dashboard-presets.sqlite'))
+    parser.add_argument('--comparison-example', action='store_true', help='load an explicitly invented three-session comparison source')
     parser.add_argument('--research-db', type=Path, default=Path('results/dashboard-research.sqlite'))
     args = parser.parse_args()
     if not (args.web_dir / 'index.html').is_file():
         parser.error('frontend missing: run npm ci && npm run build in web/ first')
     import uvicorn
-    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db),
+    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db, comparison_example=args.comparison_example),
                 host='127.0.0.1', port=args.port, workers=1, access_log=False)
 
 

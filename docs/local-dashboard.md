@@ -129,8 +129,9 @@ for that independent research step.
   (entry-capacity.md); remaining broker partial-fill integration is required
   before exposing paper submission controls. Schedule gates entries, never position management.
 - Durable research run/job storage and explicitly requested queue execution are
-  implemented (durable-research.md). Next: comparisons/cost stress and chronological
-  holdouts. No automated chasing of yesterday's best parameters.
+  implemented (durable-research.md). Schedule/cost/date comparisons now run through
+  that queue (schedule-cost-comparisons.md). Untouched holdout provenance, session
+  uncertainty and passive/exposure benchmarks remain required. No automated chasing of yesterday's best parameters.
 - Read-only paper snapshot integration, then recovery/reconciliation prerequisites
   before any separately authorised paper submission; news context remains later.
 
