@@ -2,7 +2,7 @@
 
 The local platform now has real selection, edit/save/duplicate/reset, historical
 version inspection and application to a separate historical evaluation. This now covers **supported risk/cost inputs plus New York entry weekdays and
-planned target R**. Other trading-style/timing/stop rules and durable caps remain
+planned target R and session/concurrency caps**. Other timing/stop rules remain
 unsupported. See trading-profile-variants.md for exact semantics and compatibility.
 
 ## Use in the dashboard
@@ -88,11 +88,12 @@ engine. Repeated identical run identities retain their first immutable snapshot.
 A paired saved profile report can be reimported with the matching original
 source; it does not install a mutable preset in the database.
 
-**Presets persist; run imports/evaluations currently do not.** A server restart
-clears the in-memory run list. Preserve sources and export run evidence. Durable
-research jobs remain upcoming work. Account-wide counters are now reconstructed
-from the separate offline coordinator transaction log; this preset store is not
-the account journal. External partial fills remain reconciliation-gated.
+**Presets and historical run/job snapshots now persist** in their configured
+local files. Queue saved version freezes the copied snapshot at queue time;
+Research jobs can explicitly execute/retry it. Original inputs and old results
+are retained across restarts. See [durable research](durable-research.md).
+Account counters remain in the separate offline coordinator; archive persistence
+never establishes broker reconciliation or paper execution permission.
 
 ## CLI
 
@@ -132,7 +133,7 @@ Existing loopback Host/Origin, JSON, content-policy and size guards apply. Prese
 mutations have an 8 KiB limit. No order, paper activation, news or credential
 endpoint is added. Public hosting still requires separate design/authorisation.
 
-Next: durable historical jobs and comparisons/holdouts, followed by remaining
+Next: cost sensitivity and chronological comparisons/holdouts, followed by remaining
 partial-fill account/recovery integration before enabling paper controls. Preserve the fixed reference and the distinction between software
 verification, historical economic evidence and paper observation.
 
@@ -157,5 +158,5 @@ Pending reservations hold slots, first modeled fills consume one session entry,
 and exits release concurrency only. A cap never creates a trade or re-arms a
 consumed candidate. Existing timing, costs, data/loss gates and tie ordering
 remain authoritative. The durable offline coordinator serialises and reconstructs
-these counters with cash/risk/intents; historical dashboard runs remain in memory.
+these counters with cash/risk/intents; historical dashboard runs now use the optional separate research archive.
 No paper execution or external partial-fill resource release is enabled.

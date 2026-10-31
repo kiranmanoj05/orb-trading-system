@@ -354,6 +354,24 @@ export default function Presets({
               {busy ? "Working…" : "Apply saved version to new run"}
             </button>
           </div>
+          <div className="controls">
+            <button
+              disabled={busy || dirty || !runId}
+              onClick={() =>
+                action(async () => {
+                  const job = await request(`/api/runs/${runId}/queue-preset`, {
+                    preset_id: saved.id,
+                    version: saved.version,
+                  });
+                  setNotice(
+                    `${job.state === "queued" ? "Queued" : "Existing " + job.state + " job for"} ${saved.name} v${saved.version}. Job ${job.id.slice(0, 8)}: inspect Research jobs.`,
+                  );
+                })
+              }
+            >
+              Queue saved version
+            </button>
+          </div>
           {dirty && (
             <p className="caption">
               Save or reset the draft before applying. Duplicate uses the saved
@@ -376,8 +394,8 @@ export default function Presets({
             </p>
             <p>
               Presets persist across server restarts when a database is
-              configured. Historical runs currently remain session-local. This
-              does not resume historical runs or activate paper execution. The
+              configured. Research archives also persist when configured; queued
+              jobs pin this exact version and require explicit execution. The
               offline coordinator persists admission counters in its separate
               account journal; external partial fills still require
               reconciliation.

@@ -7,7 +7,8 @@
     "build": "tsc --noEmit && node build.mjs",
     "check": "tsc --noEmit",
     "test:browser": "node tests/browser.mjs",
-    "test:presets": "node tests/presets-browser.mjs"
+    "test:presets": "node tests/presets-browser.mjs",
+    "test:research": "node tests/research-browser.mjs"
   },
   "dependencies": {
     "react": "19.3.1",

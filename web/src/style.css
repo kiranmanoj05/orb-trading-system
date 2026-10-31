@@ -863,3 +863,13 @@ h2,
 .weekday-fields .check {
   margin-right: 12px;
 }
+
+.research-jobs {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+.research-jobs article {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

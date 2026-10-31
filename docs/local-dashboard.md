@@ -86,18 +86,14 @@ silently change that scope. CSV synthetic/historical status is unknown regardles
 of its label; capture data kind is an unverified declaration. All built-in examples
 are conspicuously synthetic.
 
-Local limits are 10 MiB of encoded request, 20,000 bars, 31 calendar days and 12
-runs per server session. Additional numeric bounds prevent pathological Decimal
-expansion; these are viewer bounds, not changes to the core strategy. Larger
-research jobs require the future persisted job queue. No uploaded contents or
-credentials are reflected in API validation errors.
-
-`GET /api/runs` lists summaries; `GET /api/runs/{id}` returns complete engine
-and dashboard evidence. Runs are immutable snapshots held in memory, not a
-restart-safe store. Restart clears them. Exported dashboard JSON is review
-output; it is not itself a source import (retain original CSV/capture/report).
-No public hosting, authentication, durable jobs or multiworker behaviour is
-claimed. The trusted local user can inspect all this session's runs.
+Local imports are bounded to 10 MiB requests, 20,000 bars and 31 calendar days.
+The CLI now uses a persistent research archive with 100 runs and explicit queued
+saved-version jobs. See [durable research](durable-research.md) for retention,
+limits, engine pinning and interruption/retry semantics. Embedded API tests with
+no research_db remain temporary. Original sources are retained and snapshots
+are never silently recomputed after an engine upgrade. No remote URL is followed.
+Exported dashboard JSON is review output; retain the matching original source.
+No public hosting/authentication or distributed worker service is claimed.
 
 Host and Origin checks reject browser DNS rebinding and cross-origin requests.
 Writes require JSON, no CORS is enabled, assets have an allowlist, and responses
@@ -126,13 +122,14 @@ for that independent research step.
 
 - Supported risk/cost selection, edit/save/duplicate/reset, draft/applied states
   and immutable per-run versions are implemented (research-presets.md).
-  Complete the remaining strategy/schedule controls and durable caps before
+  Complete the remaining timing/stop variants and paper integration before
   calling the broader preset acceptance criteria complete.
 - NY weekday variants and target-R settings are now implemented with a fixed
   reference (trading-profile-variants.md). v3 now adds entry/concurrency controls and durable offline counters
   (entry-capacity.md); remaining broker partial-fill integration is required
   before exposing paper submission controls. Schedule gates entries, never position management.
-- Durable research run/job storage, comparisons/cost stress and chronological
+- Durable research run/job storage and explicitly requested queue execution are
+  implemented (durable-research.md). Next: comparisons/cost stress and chronological
   holdouts. No automated chasing of yesterday's best parameters.
 - Read-only paper snapshot integration, then recovery/reconciliation prerequisites
   before any separately authorised paper submission; news context remains later.
@@ -151,7 +148,7 @@ controls. Applying a version creates a separate evaluator-backed profile run.
 Preset metadata and applied values are frozen together; source/bundle identity
 and explicit coverage scope remain visible. Duplicate identical run identities
 retain their first stored snapshot. This is separate from durable job/account
-state: imported and generated runs remain session-local.
+state. The later 30 October increment adds persistent runs/jobs; see durable-research.md.
 
 Run the additional preset browser workflow with:
 

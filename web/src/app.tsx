@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
+import ResearchJobs from "./ResearchJobs";
 
 type Row = Record<string, any>; // Read-only engine evidence; never sent as execution instructions.
 type Run = {
@@ -412,9 +413,11 @@ function Equity({ samples }: { samples: Row[] }) {
   );
 }
 function ImportDialog({
+  durable,
   close,
   onImported,
 }: {
+  durable: boolean;
   close: () => void;
   onImported: (id: string) => Promise<void>;
 }) {
@@ -551,8 +554,11 @@ function ImportDialog({
           />
         </label>
         <small>
-          Up to 31 calendar days / 20,000 bars / 10 MiB. Imports stay in this
-          server session and clear on restart. No credentials or .env files.
+          Up to 31 calendar days / 20,000 bars / 10 MiB. Imports stay in
+          {durable
+            ? "a local database and survive server restarts"
+            : "temporary memory and clear on restart"}
+          . No credentials or .env files.
         </small>
         {error && (
           <p role="alert" className="warning">
@@ -577,6 +583,7 @@ function App() {
     [session, setSession] = useState(""),
     [chosen, setChosen] = useState(""),
     [importing, setImporting] = useState(false);
+  const [durable, setDurable] = useState(false);
   const [opaque, setOpaque] = useState(() => {
     try {
       return localStorage.getItem("orb-opaque") === "true";
@@ -585,6 +592,8 @@ function App() {
     }
   });
   async function refresh(preferred?: string) {
+    const storage = await api("/api/storage");
+    setDurable(storage.durable);
     const list: Listing[] = await api("/api/runs");
     setRuns(list);
     setId(preferred || list[0]?.id || "");
@@ -658,19 +667,23 @@ function App() {
         </a>
         <div className="workspace-label">Research desk</div>
         <nav aria-label="Workspace">
-          {["Overview", "Decisions", "Applied settings", "Data & health"].map(
-            (v, i) => (
-              <button
-                key={v}
-                aria-current={tab === v ? "page" : undefined}
-                className={tab === v ? "active" : ""}
-                onClick={() => setTab(v)}
-              >
-                <span className="nav-index">0{i + 1}</span>
-                {v}
-              </button>
-            ),
-          )}
+          {[
+            "Overview",
+            "Decisions",
+            "Applied settings",
+            "Data & health",
+            "Research jobs",
+          ].map((v, i) => (
+            <button
+              key={v}
+              aria-current={tab === v ? "page" : undefined}
+              className={tab === v ? "active" : ""}
+              onClick={() => setTab(v)}
+            >
+              <span className="nav-index">0{i + 1}</span>
+              {v}
+            </button>
+          ))}
         </nav>
         <div className="sidebar-bottom">
           <Pill>Historical simulation</Pill>
@@ -696,7 +709,9 @@ function App() {
             Workspace <span>/</span> {tab}
           </span>
           <div className="controls">
-            <Pill>Offline research</Pill>
+            <Pill>
+              {durable ? "Local research archive" : "Temporary research"}
+            </Pill>
             <button onClick={() => setImporting(true)}>+ Import run</button>
           </div>
         </header>
@@ -749,7 +764,15 @@ function App() {
               Loading engine evidence…
             </p>
           )}
-          {!loading && !run && !error && (
+          {tab === "Research jobs" && (
+            <ResearchJobs
+              onOpen={async (newId) => {
+                await refresh(newId);
+                setTab("Overview");
+              }}
+            />
+          )}
+          {!loading && !run && !error && tab !== "Research jobs" && (
             <section className="panel">
               <h2>Your research starts with evidence.</h2>
               <p>
@@ -1309,6 +1332,7 @@ function App() {
       </main>
       {importing && (
         <ImportDialog
+          durable={durable}
           close={() => setImporting(false)}
           onImported={async (id) => {
             await refresh(id);

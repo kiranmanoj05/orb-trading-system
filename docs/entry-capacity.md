@@ -92,7 +92,7 @@ traces are still checked. Browser checks save/apply limits and retain old runs.
 These establish bounded software behaviour, not performance, provider/Mac/CI
 verification or a guarantee against gap losses.
 
-Presets and offline account commands persist; dashboard imports/evaluations
-still clear when its server restarts. Next implement durable historical jobs and
+Presets and offline account commands persist; dashboard imports/evaluations and
+frozen jobs now persist in a separate archive (durable-research.md). Next implement
 cost/holdout comparisons, then remaining broker reconciliation/recovery and
 supported timing/stop variants. Paper submissions stay disabled.
