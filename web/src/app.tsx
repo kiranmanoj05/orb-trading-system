@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
 import ResearchJobs from "./ResearchJobs";
+import Comparisons from "./Comparisons";
 
 type Row = Record<string, any>; // Read-only engine evidence; never sent as execution instructions.
 type Run = {
@@ -583,6 +584,7 @@ function App() {
     [session, setSession] = useState(""),
     [chosen, setChosen] = useState(""),
     [importing, setImporting] = useState(false);
+  const [comparisonId, setComparisonId] = useState("");
   const [durable, setDurable] = useState(false);
   const [opaque, setOpaque] = useState(() => {
     try {
@@ -673,6 +675,7 @@ function App() {
             "Applied settings",
             "Data & health",
             "Research jobs",
+            "Comparisons",
           ].map((v, i) => (
             <button
               key={v}
@@ -766,24 +769,42 @@ function App() {
           )}
           {tab === "Research jobs" && (
             <ResearchJobs
+              onComparison={(identity) => {
+                setComparisonId(identity);
+                setTab("Comparisons");
+              }}
               onOpen={async (newId) => {
                 await refresh(newId);
                 setTab("Overview");
               }}
             />
           )}
-          {!loading && !run && !error && tab !== "Research jobs" && (
-            <section className="panel">
-              <h2>Your research starts with evidence.</h2>
-              <p>
-                No runs loaded. Import canonical CSV or a capture bundle, or
-                restart with --examples for synthetic acceptance cases.
-              </p>
-              <button onClick={() => setImporting(true)}>
-                Import your first run
-              </button>
-            </section>
+          {tab === "Comparisons" && (
+            <Comparisons
+              runId={id}
+              comparisonId={comparisonId}
+              onOpen={async (newId) => {
+                await refresh(newId);
+                setTab("Overview");
+              }}
+            />
           )}
+          {!loading &&
+            !run &&
+            !error &&
+            tab !== "Research jobs" &&
+            tab !== "Comparisons" && (
+              <section className="panel">
+                <h2>Your research starts with evidence.</h2>
+                <p>
+                  No runs loaded. Import canonical CSV or a capture bundle, or
+                  restart with --examples for synthetic acceptance cases.
+                </p>
+                <button onClick={() => setImporting(true)}>
+                  Import your first run
+                </button>
+              </section>
+            )}
           {!run && !loading && tab === "Applied settings" && (
             <Presets
               onApplied={async (newId) => {
@@ -1085,6 +1106,11 @@ function App() {
                   <Presets
                     runId={id}
                     applied={run.applied_settings.preset}
+                    appliedNote={
+                      run.applied_settings.comparison_trial
+                        ? `Comparison trial: ${run.applied_settings.comparison_trial.preset.name} v${run.applied_settings.comparison_trial.preset.version}; cost override ${run.applied_settings.comparison_trial.cost_scenario.name}. Effective values below; saved preset unchanged.`
+                        : undefined
+                    }
                     onApplied={async (newId) => {
                       await refresh(newId);
                     }}
@@ -1096,9 +1122,11 @@ function App() {
                           Immutable applied configuration
                         </span>
                         <h2>
-                          {run.applied_settings.preset
-                            ? `${run.applied_settings.preset.name} · v${run.applied_settings.preset.version}`
-                            : "ORB Reference signal rules"}
+                          {run.applied_settings.comparison_trial
+                            ? "Comparison trial effective settings"
+                            : run.applied_settings.preset
+                              ? `${run.applied_settings.preset.name} · v${run.applied_settings.preset.version}`
+                              : "ORB Reference signal rules"}
                         </h2>
                       </div>
                       <Pill>Read only</Pill>

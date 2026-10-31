@@ -7,6 +7,7 @@ type Job = {
   started_at: string | null;
   finished_at: string | null;
   result_id: string | null;
+  comparison_id?: string;
   error: string | null;
   engine_current: boolean;
   request: {
@@ -25,8 +26,10 @@ async function request(path: string, post = false) {
 }
 export default function ResearchJobs({
   onOpen,
+  onComparison,
 }: {
   onOpen: (id: string) => Promise<void>;
+  onComparison?: (id: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]),
     [durable, setDurable] = useState(false),
@@ -117,7 +120,9 @@ export default function ResearchJobs({
               <strong>
                 {job.request.preset
                   ? `${job.request.preset.name} · v${job.request.preset.version}`
-                  : "Validated source import"}
+                  : job.request.kind === "comparison"
+                    ? "Schedule / cost comparison"
+                    : "Validated source import"}
               </strong>
               <span className="pill">{job.state}</span>
             </div>
@@ -143,6 +148,11 @@ export default function ResearchJobs({
               </p>
             )}
             <div className="controls">
+              {job.comparison_id && (
+                <button onClick={() => onComparison?.(job.comparison_id!)}>
+                  Open comparison {job.comparison_id.slice(0, 8)}
+                </button>
+              )}
               {job.result_id && (
                 <button
                   disabled={busy}

@@ -873,3 +873,23 @@ h2,
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.table-scroll table {
+  min-width: 950px;
+}
+
+.comparison-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.comparison-panel input,
+.comparison-panel select {
+  min-width: 0;
+  max-width: 100%;
+}
+.comparison-panel .view-controls label {
+  max-width: 100%;
+}
