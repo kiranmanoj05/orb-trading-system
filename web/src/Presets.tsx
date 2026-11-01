@@ -126,7 +126,7 @@ export default function Presets({
       <div className="section-head">
         <div>
           <span className="eyebrow">Versioned research controls</span>
-          <h2>Build a deliberate experiment.</h2>
+          <h2>Strategy & risk</h2>
         </div>
         <span className="pill">
           {durable

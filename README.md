@@ -53,10 +53,10 @@ From the repository root (Python 3.11+ and Node 22+):
 python -m pip install -e '.[dev,dashboard]'
 npm --prefix web ci
 npm --prefix web run build
-python -m orb.dashboard_api --examples
+python -m orb.dashboard_api
 ```
 
-Open **http://127.0.0.1:8765**. Omit `--examples` to start with an empty session.
+Open **http://127.0.0.1:8765**. Complete Alpaca bundles in immediate child folders of `data/` are discovered and evaluated automatically. Add `--examples` only to inspect clearly labelled invented test data.
 Use **Import run** for canonical CSV, `capture.json`, or all three original
 bundle files (`capture.json`, `bars.csv`, `manifest.json`). Pair a saved v4/v5
 evaluation JSON to retain its settings, declared scope and original identity.
@@ -64,7 +64,7 @@ The service verifies source/configuration identities and recomputes results
 with the current engine; it never displays uploaded metrics as verified results.
 Missing-data gates remain intact. See [local dashboard details](docs/local-dashboard.md).
 
-In **Applied settings**, duplicate ORB Reference to edit supported risk/cost
+In **Settings**, duplicate ORB Reference to edit supported risk/cost
 settings, save a new version, reset a draft, inspect version history and apply an
 exact saved version to a **new** historical run. Presets persist in the local
 SQLite file `results/dashboard-presets.sqlite` (override with `--preset-db`).
@@ -77,6 +77,41 @@ and frozen preset jobs now persist in the local research archive; see
 shared engine and restart-safe offline coordinator. See [capacity semantics](docs/entry-capacity.md).
 See [preset controls and CLI](docs/research-presets.md) and
 [weekday/target variants](docs/trading-profile-variants.md).
+
+## Alpaca in the dashboard
+
+The approved dark glass design is now in the actual React app: account equity,
+green/red candles, an expandable chart with range/entry/stop/target/exit evidence,
+Settings, and on-demand Trades/Data/Account/Research details. The moving droplet
+logo and original-resolution video wallpaper are bundled locally. Uploaded media
+stays at original quality in this browser's IndexedDB; it does not sync devices.
+
+Open **Data & Alpaca**:
+
+- **Fetch & simulate** acquires SPY/QQQ historical SIP or IEX candles (at most seven
+  calendar days, historical-only), evaluates with the Python engine and saves the
+  source and result. Apply an exact saved preset afterwards through Settings.
+- **Refresh local bundles** discovers `data/*/{capture.json,bars.csv,manifest.json}`
+  without credentials. For old custom configurations, use Import run and pair
+  the original evaluation JSON instead of assuming defaults.
+- **Refresh paper account** observes paper equity, cash, positions and latest
+  500 orders, including cumulative fills. Paper mode refreshes every 30 seconds
+  while the visible page is active. This app does not submit any orders.
+
+Credentials must be available as `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the
+terminal environment **before** starting the server. The dashboard never accepts,
+stores or returns keys. It does not automatically source `.env` files. Your successful
+CLI connection does not carry into a separate terminal/server process by itself.
+Missing credentials, denied entitlements and provider errors are displayed explicitly.
+Never paste keys into chat or commit them.
+
+Simulation capital/results stay separate from broker equity. All engine candidates
+are visible, including known skips, risk rejections and unresolved outcomes. Paper
+orders are not automatically attributed to ORB. Chart markers show cumulative
+average order fills over matching symbol/date candles, not individual executions.
+The 500-order cap is explicit; older history is not claimed complete. Historical
+candles are not a live stream, and observation is not a recovery reconciliation.
+See [workspace integration](docs/glass-alpaca-workspace.md).
 
 ## Dashboard contract and synthetic examples
 

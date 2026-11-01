@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
 import ResearchJobs from "./ResearchJobs";
+import CandleChart from "./CandleChart";
+import Appearance, { Logo } from "./Appearance";
 
 type Row = Record<string, any>; // Read-only engine evidence; never sent as execution instructions.
 type Run = {
@@ -93,273 +95,6 @@ function Pair({ name, value }: { name: string; value: React.ReactNode }) {
       <span>{name}</span>
       <strong>{value}</strong>
     </div>
-  );
-}
-function Chart({
-  run,
-  symbol,
-  session,
-  selected,
-}: {
-  run: Run;
-  symbol: string;
-  session: string;
-  selected?: Row;
-}) {
-  const [focus, setFocus] = useState(true);
-  const [levels, setLevels] = useState(true);
-  const all = run.candles.filter(
-    (c) => c.symbol === symbol && day(c.start) === session,
-  );
-  const opening = run.opening_ranges.find(
-    (r) => r.symbol === symbol && r.session === session,
-  );
-  const selectedHere =
-    selected?.symbol === symbol && day(selected.signal.observed_at) === session
-      ? selected
-      : undefined;
-  const anchor = selectedHere
-    ? Date.parse(selectedHere.signal.observed_at)
-    : all.length
-      ? Date.parse(all[0].start) + 15 * 60000
-      : 0;
-  const first = focus
-    ? anchor - 17 * 60000
-    : all.length
-      ? Date.parse(all[0].start)
-      : 0;
-  const last = focus
-    ? anchor + 25 * 60000
-    : all.length
-      ? Date.parse(all.at(-1)!.start) + 60000
-      : 1;
-  const candles = all.filter(
-    (c) => Date.parse(c.start) >= first && Date.parse(c.start) <= last,
-  );
-  const t = selectedHere?.trade;
-  const overlays: [string, any, string][] = [];
-  if (opening)
-    overlays.push(
-      ["Range high", opening.high, "#91c5ff"],
-      ["Range low", opening.low, "#91c5ff"],
-    );
-  if (t) {
-    overlays.push(
-      ["Stop", t.stop, "#f6aaa9"],
-      ["Fill target", t.target, "#9ee7d5"],
-    );
-    if (t.entry_price) overlays.push(["Entry", t.entry_price, "#f5db9d"]);
-  }
-  const values = candles
-    .flatMap((c) => [Number(c.low), Number(c.high)])
-    .concat(
-      levels
-        ? overlays
-            .filter((o) => o[1] != null)
-            .map((o) => Number(o[1]))
-            .filter(Number.isFinite)
-        : [],
-    );
-  const lo = Math.min(...values),
-    hi = Math.max(...values),
-    padding = Math.max((hi - lo) * 0.16, 0.02);
-  const x = (stamp: string) =>
-    62 + ((Date.parse(stamp) - first) / (last - first)) * 790;
-  const y = (price: any) =>
-    260 - ((Number(price) - lo + padding) / (hi - lo + 2 * padding)) * 225;
-  const labelY = new Map<string, number>();
-  let previousLabel = 0;
-  for (const [name, value] of [...overlays]
-    .filter((o) => o[1] != null)
-    .sort((a, b) => y(a[1]) - y(b[1]))) {
-    const placed = Math.max(y(value) + 4, previousLabel + 16);
-    labelY.set(name, placed);
-    previousLabel = placed;
-  }
-  return (
-    <section className="panel chart-panel">
-      <div className="section-head">
-        <div>
-          <span className="eyebrow">Price action · 1 minute</span>
-          <h2>
-            {symbol} <span className="muted">/ {session}</span>
-          </h2>
-        </div>
-        <div className="controls">
-          <button aria-pressed={focus} onClick={() => setFocus(!focus)}>
-            {focus ? "Show full session" : "Focus opening / trade"}
-          </button>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={levels}
-              onChange={(e) => setLevels(e.target.checked)}
-            />
-            Levels
-          </label>
-        </div>
-      </div>
-      {candles.length ? (
-        <>
-          <svg
-            className="candles"
-            viewBox="0 0 1000 310"
-            role="img"
-            aria-label={`${symbol} ${session} one-minute candlesticks, New York time. Missing minutes remain gaps.`}
-          >
-            {Array.from({ length: 5 }, (_, i) => {
-              const p = lo + ((hi - lo) * i) / 4;
-              return (
-                <g key={i}>
-                  <line
-                    x1="60"
-                    x2="855"
-                    y1={y(p)}
-                    y2={y(p)}
-                    className="gridline"
-                  />
-                  <text x="10" y={y(p) + 4}>
-                    {p.toFixed(2)}
-                  </text>
-                </g>
-              );
-            })}
-            {opening && (
-              <rect
-                x={Math.max(62, x(opening.start))}
-                y={y(opening.high)}
-                width={Math.max(
-                  0,
-                  Math.min(852, x(opening.available_at)) -
-                    Math.max(62, x(opening.start)),
-                )}
-                height={Math.max(0, y(opening.low) - y(opening.high))}
-                fill="#78b7fb"
-                opacity=".09"
-              />
-            )}
-            {candles.map((c) => {
-              const colour =
-                Number(c.close) >= Number(c.open) ? "#9ee7d5" : "#f6aaa9";
-              const width = Math.max(
-                0.8,
-                Math.min(9, (790 / ((last - first) / 60000)) * 0.55),
-              );
-              return (
-                <g key={c.start}>
-                  <title>
-                    {ny(c.start)} NY · O {c.open} H {c.high} L {c.low} C{" "}
-                    {c.close} · Volume {c.volume}
-                  </title>
-                  <line
-                    x1={x(c.start)}
-                    x2={x(c.start)}
-                    y1={y(c.high)}
-                    y2={y(c.low)}
-                    stroke={colour}
-                  />
-                  <rect
-                    x={x(c.start) - width / 2}
-                    y={Math.min(y(c.open), y(c.close))}
-                    width={width}
-                    height={Math.max(1, Math.abs(y(c.open) - y(c.close)))}
-                    fill={colour}
-                  />
-                </g>
-              );
-            })}
-            {levels &&
-              overlays.map(
-                ([name, value, colour]) =>
-                  value != null && (
-                    <g key={name}>
-                      <line
-                        x1="62"
-                        x2="852"
-                        y1={y(value)}
-                        y2={y(value)}
-                        stroke={colour}
-                        strokeDasharray="5 5"
-                        opacity=".65"
-                      />
-                      <text x="864" y={labelY.get(name)} fill={colour}>
-                        {name} {Number(value).toFixed(2)}
-                      </text>
-                    </g>
-                  ),
-              )}
-            {selectedHere &&
-              [
-                ["Signal", selectedHere.signal.observed_at],
-                ["Fill", t?.entry_at],
-                ["Exit", t?.exit_at],
-              ].map(
-                ([label, stamp], i) =>
-                  stamp &&
-                  x(stamp) >= 62 &&
-                  x(stamp) <= 852 && (
-                    <g key={label}>
-                      <line
-                        x1={x(stamp)}
-                        x2={x(stamp)}
-                        y1="24"
-                        y2="265"
-                        stroke="#d9e8ff"
-                        opacity=".25"
-                      />
-                      <text x={x(stamp) + 4} y={25 + i * 17}>
-                        {label}
-                      </text>
-                    </g>
-                  ),
-              )}
-            {[0, 0.25, 0.5, 0.75, 1].map((v) => (
-              <text key={v} x={62 + v * 790} y="294" textAnchor="middle">
-                {ny(new Date(first + (last - first) * v).toISOString())}
-              </text>
-            ))}
-          </svg>
-          <div className="chart-foot">
-            <span>New York time · USD · historical review</span>
-            <span>Up / flat: mint · Down: rose · Missing minute: gap</span>
-          </div>
-          <details>
-            <summary>
-              Accessible candle table ({candles.length} visible bars)
-            </summary>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    {["NY start", "Open", "High", "Low", "Close", "Volume"].map(
-                      (v) => (
-                        <th key={v}>{v}</th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {candles.map((c) => (
-                    <tr key={c.start}>
-                      <td>{ny(c.start)}</td>
-                      {["open", "high", "low", "close", "volume"].map((k) => (
-                        <td key={k}>{c[k]}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </>
-      ) : (
-        <p>No candles for this symbol/session. Missing data is not repaired.</p>
-      )}
-      <p className="caption">
-        Opening range freezes at 09:45 NY. Signal reference and actual modeled
-        fill targets can differ. Intraminute event order is unknown.
-      </p>
-    </section>
   );
 }
 function Equity({ samples }: { samples: Row[] }) {
@@ -572,775 +307,775 @@ function ImportDialog({
     </dialog>
   );
 }
+function Modal({
+  title,
+  close,
+  children,
+}: {
+  title: string;
+  close: () => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return (
+    <dialog ref={ref} className="glass drawer" onCancel={close}>
+      <div className="drawer-head">
+        <h2>{title}</h2>
+        <button className="icon" aria-label="Close panel" onClick={close}>
+          ×
+        </button>
+      </div>
+      {children}
+    </dialog>
+  );
+}
 function App() {
+  const pendingView = useRef<{ symbol: string; session: string } | null>(null);
   const [runs, setRuns] = useState<Listing[]>([]),
     [id, setId] = useState(""),
     [run, setRun] = useState<Run | null>(null),
-    [loading, setLoading] = useState(true),
-    [error, setError] = useState(""),
-    [tab, setTab] = useState("Overview"),
+    [tab, setTab] = useState("Workspace"),
+    [panel, setPanel] = useState(""),
+    [appearance, setAppearance] = useState(false),
+    [importing, setImporting] = useState(false),
     [symbol, setSymbol] = useState("SPY"),
     [session, setSession] = useState(""),
     [chosen, setChosen] = useState(""),
-    [importing, setImporting] = useState(false);
-  const [durable, setDurable] = useState(false);
-  const [opaque, setOpaque] = useState(() => {
-    try {
-      return localStorage.getItem("orb-opaque") === "true";
-    } catch {
-      return false;
-    }
-  });
+    [error, setError] = useState(""),
+    [loading, setLoading] = useState(false),
+    [busy, setBusy] = useState(false),
+    [durable, setDurable] = useState(false),
+    [status, setStatus] = useState<Row | null>(null),
+    [paper, setPaper] = useState<Row | null>(null),
+    [mode, setMode] = useState("simulation"),
+    [feed, setFeed] = useState("sip"),
+    [start, setStart] = useState(""),
+    [end, setEnd] = useState(""),
+    [local, setLocal] = useState<Row[]>([]);
   async function refresh(preferred?: string) {
-    const storage = await api("/api/storage");
+    const [rows, storage, connection, bundles] = await Promise.all([
+      api("/api/runs"),
+      api("/api/storage"),
+      api("/api/alpaca/status"),
+      api("/api/local-bundles"),
+    ]);
+    setRuns(rows);
     setDurable(storage.durable);
-    const list: Listing[] = await api("/api/runs");
-    setRuns(list);
-    setId(preferred || list[0]?.id || "");
+    setStatus(connection);
+    setLocal(bundles.imports);
+    setId(
+      (old) =>
+        preferred ||
+        old ||
+        [...rows].reverse().find((r: Listing) => !r.synthetic && r.complete)
+          ?.id ||
+        [...rows].reverse().find((r: Listing) => !r.synthetic)?.id ||
+        rows[0]?.id ||
+        "",
+    );
   }
   useEffect(() => {
-    refresh()
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    refresh().catch((e) => setError(e.message));
   }, []);
   useEffect(() => {
-    if (!id) return;
-    let current = true;
+    if (!id) {
+      setRun(null);
+      return;
+    }
+    let live = true;
     setLoading(true);
-    setError("");
-    setRun(null);
     api("/api/runs/" + id)
       .then((r) => {
-        if (current) {
-          setRun(r);
-          setSession(
+        if (!live) return;
+        setRun(r);
+        const d = r.decisions[0],
+          pending = pendingView.current;
+        setSession(
+          pending?.session ||
             r.evidence.coverage[0]?.session ||
-              r.applied_settings.values.start_session,
-          );
-          setChosen(r.decisions[0]?.signal_id || "");
-          setSymbol(r.decisions[0]?.symbol || "SPY");
-        }
+            r.applied_settings.values.start_session,
+        );
+        setSymbol(pending?.symbol || d?.symbol || "SPY");
+        setChosen(pending ? "" : d?.signal_id || "");
+        pendingView.current = null;
       })
       .catch((e) => {
-        if (current) setError(e.message);
+        if (live) setError(e.message);
       })
       .finally(() => {
-        if (current) setLoading(false);
+        if (live) setLoading(false);
       });
     return () => {
-      current = false;
+      live = false;
     };
   }, [id]);
-  useEffect(() => {
-    document.documentElement.dataset.opaque = String(opaque);
+  async function work(fn: () => Promise<void>) {
+    setBusy(true);
+    setError("");
     try {
-      localStorage.setItem("orb-opaque", String(opaque));
-    } catch {}
-  }, [opaque]);
-  const e = run?.evidence,
-    s = e?.summary,
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Operation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function observe() {
+    await work(async () => {
+      const value = await api("/api/alpaca/observe", { method: "POST" });
+      setPaper(value);
+      setMode("paper");
+      setPanel("");
+    });
+  }
+  async function fetchMarket() {
+    await work(async () => {
+      const result = await api("/api/alpaca/fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_session: start,
+          end_session: end || start,
+          feed,
+        }),
+      });
+      await refresh(result.id);
+      if (!pendingView.current) setMode("simulation");
+      setPanel("");
+    });
+  }
+  useEffect(() => {
+    if (mode !== "paper" || !paper) return;
+    let active = true;
+    const timer = setInterval(() => {
+      if (document.hidden || busy) return;
+      api("/api/alpaca/observe", { method: "POST" })
+        .then((v) => {
+          if (active) setPaper(v);
+        })
+        .catch((e) => {
+          if (active) setError("Paper refresh failed: " + e.message);
+        });
+    }, 30000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [mode, !!paper, busy]);
+  const evidence = run?.evidence,
+    summary = evidence?.summary,
     config = run?.applied_settings.values,
-    account = e?.portfolio.account;
-  const decision = run?.decisions.find((d) => d.signal_id === chosen);
+    selected = run?.decisions.find((d) => d.signal_id === chosen),
+    samples = evidence?.valuation.samples || [],
+    lastSample = samples.at(-1);
+  const balance =
+    mode === "paper" ? paper?.account.equity : (lastSample?.equity ?? null);
   const sessions: string[] = run
-    ? [...new Set<string>(e!.coverage.map((c: Row) => c.session))]
+    ? [...new Set<string>(evidence!.coverage.map((c: Row) => c.session))]
     : [];
+  const paperFills = (paper?.orders || []).filter(
+    (o: Row) => Number(o.filled_quantity) > 0,
+  );
+  function select(d: Row) {
+    setChosen(d.signal_id);
+    setSymbol(d.symbol);
+    setSession(day(d.signal.observed_at));
+    setPanel("");
+    setTab("Workspace");
+  }
   function exportRun() {
     if (!run) return;
     const url = URL.createObjectURL(
-      new Blob([JSON.stringify(run, null, 2) + "\n"], {
-        type: "application/json",
-      }),
+      new Blob([JSON.stringify(run, null, 2)], { type: "application/json" }),
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = `orb-dashboard-${run.evaluation_id.slice(0, 12)}.json`;
+    a.download = `orb-${run.evaluation_id.slice(0, 12)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
   return (
-    <div className="shell">
-      <aside className="sidebar glass">
-        <a className="brand" href="#">
-          <span className="orb" />
-          ORB<span className="brand-small">WORKSPACE</span>
-        </a>
-        <div className="workspace-label">Research desk</div>
-        <nav aria-label="Workspace">
-          {[
-            "Overview",
-            "Decisions",
-            "Applied settings",
-            "Data & health",
-            "Research jobs",
-          ].map((v, i) => (
+    <>
+      <Appearance open={appearance} onClose={() => setAppearance(false)} />
+      <div className="app">
+        <header>
+          <div className="brand">
             <button
-              key={v}
-              aria-current={tab === v ? "page" : undefined}
-              className={tab === v ? "active" : ""}
-              onClick={() => setTab(v)}
+              className="brandmark"
+              onClick={() => setPanel("Logo")}
+              aria-label="Preview liquid ORB logo"
             >
-              <span className="nav-index">0{i + 1}</span>
-              {v}
+              <Logo />
             </button>
-          ))}
-        </nav>
-        <div className="sidebar-bottom">
-          <Pill>Historical simulation</Pill>
-          <p>
-            Read-only engine evidence.
-            <br />
-            Order submission unavailable.
-          </p>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={opaque}
-              onChange={(e) => setOpaque(e.target.checked)}
-            />
-            Reduce transparency
-          </label>
-          <small>Local session · SPY / QQQ</small>
-        </div>
-      </aside>
-      <main>
-        <header className="topbar glass">
-          <span className="breadcrumb">
-            Workspace <span>/</span> {tab}
-          </span>
-          <div className="controls">
-            <Pill>
-              {durable ? "Local research archive" : "Temporary research"}
-            </Pill>
-            <button onClick={() => setImporting(true)}>+ Import run</button>
-          </div>
-        </header>
-        <div className="content">
-          <div className="title-row">
-            <div>
-              <span className="eyebrow">Opening range breakout</span>
-              <h1>
-                {tab === "Overview" ? "A clearer view of every decision." : tab}
-              </h1>
-              <p className="muted">
-                Inspect the evidence. Understand the limits.
-              </p>
-            </div>
-            <label className="run-picker">
-              Selected run
-              <select
-                aria-label="Selected run"
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-              >
-                <option value="" disabled>
-                  Choose a run
-                </option>
-                {runs.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.synthetic ? "SYNTHETIC · " : ""}
-                    {r.label}
-                    {r.preset ? ` · ${r.preset.name} v${r.preset.version}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {error && (
-            <div role="alert" className="warning">
-              {error}
-              <button
-                onClick={() => {
-                  setError("");
-                  refresh(id).catch((e) => setError(e.message));
-                }}
-              >
-                Retry connection
-              </button>
-            </div>
-          )}
-          {loading && (
-            <p role="status" className="panel">
-              Loading engine evidence…
-            </p>
-          )}
-          {tab === "Research jobs" && (
-            <ResearchJobs
-              onOpen={async (newId) => {
-                await refresh(newId);
-                setTab("Overview");
+            <a
+              href="#"
+              className="wordmark"
+              onClick={(e) => {
+                e.preventDefault();
+                setTab("Workspace");
               }}
-            />
-          )}
-          {!loading && !run && !error && tab !== "Research jobs" && (
-            <section className="panel">
-              <h2>Your research starts with evidence.</h2>
-              <p>
-                No runs loaded. Import canonical CSV or a capture bundle, or
-                restart with --examples for synthetic acceptance cases.
-              </p>
-              <button onClick={() => setImporting(true)}>
-                Import your first run
+            >
+              orb
+            </a>
+            <span className="demo">
+              {run?.import_context.synthetic ? "Synthetic" : "Local"}
+            </span>
+          </div>
+          <nav className="glass segmented" aria-label="Main navigation">
+            {["Workspace", "Settings"].map((v) => (
+              <button
+                key={v}
+                className={tab === v ? "active" : ""}
+                onClick={() => setTab(v)}
+              >
+                {v}
               </button>
-            </section>
-          )}
-          {!run && !loading && tab === "Applied settings" && (
+            ))}
+          </nav>
+          <button
+            className="icon glass appearance"
+            aria-label="Appearance"
+            onClick={() => setAppearance(true)}
+          >
+            ☼
+          </button>
+        </header>
+        {error && (
+          <div role="alert" className="warning">
+            {error}
+            <button onClick={() => setError("")} aria-label="Dismiss error">
+              ×
+            </button>
+          </div>
+        )}
+        {tab === "Settings" ? (
+          <main className="settings-view">
             <Presets
+              runId={id || undefined}
+              applied={run?.applied_settings.preset}
               onApplied={async (newId) => {
                 await refresh(newId);
+                setMode("simulation");
+                setTab("Workspace");
               }}
             />
-          )}
-          {run && (
-            <>
-              <div
-                className={`notice ${run.metrics_eligible ? "" : "warning"}`}
-                role="status"
-              >
-                <span>
-                  {run.import_context.synthetic === true
-                    ? "SYNTHETIC EXAMPLE · Invented prices. "
-                    : ""}
-                  {run.metrics_eligible
-                    ? "Complete within declared scope."
-                    : "Incomplete evidence · aggregate return and drawdown withheld."}
-                </span>
-                <span>
-                  Provider authenticity unverified · {config.start_session} →{" "}
-                  {config.end_session}
-                </span>
+          </main>
+        ) : (
+          <main>
+            <section className="account glass">
+              <div>
+                <p className="label">
+                  {mode === "paper"
+                    ? "Alpaca paper equity"
+                    : "Simulation equity"}
+                </p>
+                <h1>{money(balance)}</h1>
+                <p className="return">
+                  {mode === "simulation"
+                    ? run?.metrics_eligible
+                      ? pct(summary?.total_return)
+                      : run
+                        ? "Metrics unavailable"
+                        : "No run selected"
+                    : paper
+                      ? `Observed ${new Date(paper.observed_at).toLocaleTimeString("en-GB")}`
+                      : "Not connected"}
+                  <span>
+                    {mode === "simulation" && run?.import_context.synthetic
+                      ? "Invented test prices"
+                      : mode === "simulation"
+                        ? "Historical evaluation"
+                        : "Read-only account"}
+                  </span>
+                </p>
               </div>
-              <p className="assumptions">
-                Costs: {config.slippage_bps} bps per market side ·{" "}
-                {config.fee_per_share} USD/share/side.
-                {Number(config.slippage_bps) === 0 &&
-                Number(config.fee_per_share) === 0
-                  ? " Zero-cost diagnostic; no execution-cost realism established."
-                  : " Assumed costs; not calibrated provider execution."}{" "}
-                Idealised immediate full fills.
+              <div className="account-right">
+                <button className="status" onClick={() => setPanel("Data")}>
+                  <i />
+                  {mode === "paper"
+                    ? "Paper observation"
+                    : "Historical simulation"}{" "}
+                  ⌄
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() => setPanel("Account")}
+                >
+                  View balance ↗
+                </button>
+              </div>
+            </section>
+            {loading ? (
+              <p role="status" className="panel">
+                Loading run…
               </p>
-              {(tab === "Overview" || tab === "Decisions") && (
-                <>
-                  <div className="stats">
-                    <Stat
-                      label="Account return"
-                      value={pct(s.total_return)}
-                      note={
-                        run.metrics_eligible
-                          ? "Declared historical scope"
-                          : "Withheld: incomplete evidence"
-                      }
-                    />
-                    <Stat
-                      label="Closed subset P&L"
-                      value={money(s.closed_subset.net_pnl)}
-                      note={`${s.closed_subset.count} closed · ${s.candidate_count} candidates`}
-                    />
-                    <Stat
-                      label="Maximum drawdown"
-                      value={pct(s.max_drawdown)}
-                      note="Completed-minute samples only"
-                    />
-                    <Stat
-                      label="Cash at end"
-                      value={money(account.cash)}
-                      note="Historical account · not Alpaca cash"
-                    />
-                  </div>
-                  <div className="view-controls">
-                    <label>
-                      Symbol
-                      <select
-                        value={symbol}
-                        onChange={(e) => {
-                          setSymbol(e.target.value);
-                          const d = run.decisions.find(
-                            (d) =>
-                              d.symbol === e.target.value &&
-                              day(d.signal.observed_at) === session,
-                          );
-                          setChosen(d?.signal_id || "");
-                        }}
-                      >
-                        <option>SPY</option>
-                        <option>QQQ</option>
-                      </select>
-                    </label>
-                    <label>
-                      Session (New York)
-                      <select
-                        value={session}
-                        onChange={(e) => {
-                          setSession(e.target.value);
-                          const d = run.decisions.find(
-                            (d) =>
-                              d.symbol === symbol &&
-                              day(d.signal.observed_at) === e.target.value,
-                          );
-                          setChosen(d?.signal_id || "");
-                        }}
-                      >
-                        {sessions.map((d) => (
-                          <option key={d}>{d}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <span className="muted">
-                      Retrospective candles · no live feed
-                    </span>
-                  </div>
-                  <Chart
-                    run={run}
-                    symbol={symbol}
-                    session={session}
-                    selected={decision}
-                  />
-                  <div className="two-col">
-                    <section className="panel">
-                      <div className="section-head">
-                        <div>
-                          <span className="eyebrow">
-                            Recorded engine outcomes
-                          </span>
-                          <h2>Decision journal</h2>
-                        </div>
-                        <Pill>{String(run.decisions.length)} candidates</Pill>
-                      </div>
-                      <div className="decision-list">
-                        {run.decisions.map((d) => (
-                          <button
-                            className={`decision ${chosen === d.signal_id ? "selected" : ""}`}
-                            key={d.signal_id}
-                            onClick={() => {
-                              setChosen(d.signal_id);
-                              setSymbol(d.symbol);
-                              setSession(day(d.signal.observed_at));
-                            }}
-                          >
-                            <span>
-                              <strong>{d.symbol}</strong>
-                              <small>
-                                {day(d.signal.observed_at)} ·{" "}
-                                {ny(d.signal.observed_at)} NY
-                              </small>
-                            </span>
-                            <span>
-                              <b>{words(d.outcome_class)}</b>
-                              <small>{words(d.reason)}</small>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                      {e!.portfolio.replay.sessions
-                        .filter((o: Row) => o.state !== "signalled")
-                        .map((o: Row) => (
-                          <div
-                            className="session-row"
-                            key={o.session + o.symbol}
-                          >
-                            <strong>
-                              {o.symbol} · {o.session}
-                            </strong>
-                            <span>
-                              {o.reason
-                                ? words(o.reason)
-                                : o.state === "expired"
-                                  ? "No qualifying breakout before cutoff"
-                                  : words(o.state)}
-                            </span>
-                          </div>
-                        ))}
-                    </section>
-                    <section className="panel">
-                      <span className="eyebrow">Decision evidence</span>
-                      <h2>
-                        {decision
-                          ? `${decision.symbol} · ${words(decision.reason)}`
-                          : "No candidate selected"}
-                      </h2>
-                      {decision ? (
-                        <>
-                          <Pair
-                            name="Outcome"
-                            value={words(decision.outcome_class)}
-                          />
-                          <Pair
-                            name="Completed close reference"
-                            value={money(decision.signal.entry_reference)}
-                          />
-                          <Pair
-                            name="Modeled entry / exit"
-                            value={`${money(decision.trade.entry_price)} / ${money(decision.trade.exit_price)}`}
-                          />
-                          <Pair
-                            name="Stop / filled target"
-                            value={`${money(decision.trade.stop)} / ${money(decision.trade.target)}`}
-                          />
-                          <Pair
-                            name="Quantity / fees"
-                            value={`${decision.trade.quantity} shares / ${money(decision.trade.fees)}`}
-                          />
-                          {decision.events
-                            .filter((v: Row) => v.sizing)
-                            .map((v: Row) => (
-                              <div className="inset" key={v.at}>
-                                <strong>{words(v.sizing.reason)}</strong>
-                                <Pair
-                                  name="Risk budget / deployed"
-                                  value={`${money(v.sizing.risk_budget)} / ${money(v.sizing.planned_risk)}`}
-                                />
-                                <p>
-                                  Position, cash and shared risk caps can reduce
-                                  deployed risk. A planned limit does not
-                                  guarantee the final loss.
-                                </p>
-                              </div>
-                            ))}
-                          {decision.events
-                            .filter((v: Row) => v.entry_capacity)
-                            .map((v: Row) => (
-                              <div className="inset" key={`capacity-${v.at}`}>
-                                <strong>
-                                  Entry capacity before this decision
-                                </strong>
-                                <Pair
-                                  name="Filled / pending entries"
-                                  value={`${v.entry_capacity.filled_entries} / ${v.entry_capacity.pending_entry_slots}`}
-                                />
-                                <Pair
-                                  name="Session slots used / cap"
-                                  value={`${v.entry_capacity.session_slots_used} / ${v.entry_capacity.limits.max_session_entries}`}
-                                />
-                                <Pair
-                                  name="Concurrent slots used / cap"
-                                  value={`${v.entry_capacity.concurrent_slots_used} / ${v.entry_capacity.limits.max_concurrent_positions}`}
-                                />
-                                <p>
-                                  Exits release concurrency. Filled entries
-                                  still count for this New York session. Limits
-                                  never force trades.
-                                </p>
-                              </div>
-                            ))}
-                          <details>
-                            <summary>Exact events & availability times</summary>
-                            <pre>{JSON.stringify(decision, null, 2)}</pre>
-                          </details>
-                        </>
-                      ) : (
-                        <p>
-                          Choose a candidate to inspect its recorded rules,
-                          sizing and account events.
-                        </p>
-                      )}
-                    </section>
-                  </div>
-                  {tab === "Overview" && (
-                    <div className="two-col">
-                      <section className="panel">
-                        <span className="eyebrow">Marked account history</span>
-                        <h2>Equity, with gaps intact</h2>
-                        <Equity samples={e!.valuation.samples} />
-                      </section>
-                      <section className="panel">
-                        <span className="eyebrow">End-of-run accounting</span>
-                        <h2>Capital & commitments</h2>
-                        <Pair
-                          name="Available / reserved cash"
-                          value={`${money(account.available_cash)} / ${money(account.reserved_cash)}`}
-                        />
-                        <Pair
-                          name="Entry-cost gross exposure"
-                          value={money(account.gross_exposure)}
-                        />
-                        <Pair
-                          name="Retained initial stop risk"
-                          value={money(account.committed_stop_risk)}
-                        />
-                        <Pair
-                          name="Active allocations"
-                          value={
-                            account.allocations.filter(
-                              (a: Row) => a.state !== "closed",
-                            ).length
-                          }
-                        />
-                        <details>
-                          <summary>All allocation records</summary>
-                          <pre>
-                            {JSON.stringify(account.allocations, null, 2)}
-                          </pre>
-                        </details>
-                        <p className="caption">
-                          Carrying values are distinct from market marks.
-                          Unresolved positions keep capacity allocated.
-                        </p>
-                      </section>
-                    </div>
-                  )}
-                </>
-              )}
-              {tab === "Applied settings" && (
-                <>
-                  <Presets
-                    runId={id}
-                    applied={run.applied_settings.preset}
-                    onApplied={async (newId) => {
-                      await refresh(newId);
-                    }}
-                  />
-                  <section className="panel">
-                    <div className="section-head">
-                      <div>
-                        <span className="eyebrow">
-                          Immutable applied configuration
-                        </span>
-                        <h2>
-                          {run.applied_settings.preset
-                            ? `${run.applied_settings.preset.name} · v${run.applied_settings.preset.version}`
-                            : "ORB Reference signal rules"}
-                        </h2>
-                      </div>
-                      <Pill>Read only</Pill>
-                    </div>
-                    <p>
-                      These are the immutable inputs used by this run. The
-                      preset editor above creates saved versions and separate
-                      evaluations; it cannot rewrite these results.
-                    </p>
-                    <div className="two-col">
-                      <div>
-                        {[
-                          ["Starting cash", money(config.initial_cash)],
-                          ["Risk per trade", pct(config.risk_fraction)],
-                          [
-                            "Position / gross allocation cap",
-                            `${pct(config.max_position_fraction)} / ${pct(config.max_gross_fraction)}`,
-                          ],
-                          [
-                            "Aggregate initial stop risk",
-                            pct(config.max_total_risk_fraction),
-                          ],
-                          [
-                            "Daily loss entry-block threshold",
-                            pct(config.daily_loss_fraction),
-                          ],
-                          [
-                            "Market slippage per side",
-                            `${config.slippage_bps} bps`,
-                          ],
-                          [
-                            "Fee per share per side",
-                            `${config.fee_per_share} USD`,
-                          ],
-                        ].map(([name, value]) => (
-                          <Pair key={name} name={name} value={value} />
-                        ))}
-                      </div>
-                      <div>
-                        {[
-                          ["Symbols / direction", "SPY, QQQ / long"],
-                          ["Opening range", "09:30–09:45 New York"],
-                          [
-                            "Entry eligibility",
-                            "Completed close > frozen high, before 11:00",
-                          ],
-                          [
-                            "Stop / planned target",
-                            `Range midpoint / ${config.entry_policy?.target_r || "2"}R`,
-                          ],
-                          ["Candidate cap", "1 per symbol / session"],
-                          [
-                            "Schedule",
-                            config.entry_policy
-                              ? config.entry_policy.weekdays
-                                  .map(
-                                    (d: number) =>
-                                      ["Mon", "Tue", "Wed", "Thu", "Fri"][d],
-                                  )
-                                  .join(" / ") + " (New York)"
-                              : "All eligible exchange weekdays",
-                          ],
-                          [
-                            "Session entry / concurrency caps",
-                            config.entry_caps
-                              ? `${config.entry_caps.max_session_entries} filled / session; ${config.entry_caps.max_concurrent_positions} concurrent (pending included)`
-                              : "Legacy reference: up to 2 candidates, one per symbol",
-                          ],
-                        ].map(([name, value]) => (
-                          <Pair key={name} name={name} value={value} />
-                        ))}
-                      </div>
-                    </div>
-                    <p className="caption">
-                      Daily loss blocks new entries; it is not an automatic
-                      liquidation instruction. Cost assumptions are scenarios,
-                      not measured provider execution costs.
-                    </p>
-                    <details>
-                      <summary>
-                        Configuration fingerprint & exact values
-                      </summary>
-                      <code>{run.applied_settings.sha256}</code>
-                      <pre>{JSON.stringify(config, null, 2)}</pre>
-                    </details>
-                  </section>
-                </>
-              )}
-              {tab === "Data & health" && (
-                <>
-                  <div className="two-col">
-                    <section className="panel">
-                      <span className="eyebrow">
-                        Independent completeness gates
-                      </span>
-                      <h2>Can we interpret this run?</h2>
-                      {Object.entries(run.health).map(([key, value]) => (
-                        <Pair
-                          key={key}
-                          name={words(key)}
-                          value={value ? "Complete" : "Incomplete"}
-                        />
+            ) : run ? (
+              <>
+                <div className="workspace-controls">
+                  <label>
+                    Run
+                    <select
+                      aria-label="Selected run"
+                      value={id}
+                      onChange={(e) => setId(e.target.value)}
+                    >
+                      {runs.map((r) => (
+                        <option value={r.id} key={r.id}>
+                          {r.synthetic ? "SYNTHETIC · " : ""}
+                          {r.label}
+                        </option>
                       ))}
-                      <Pair
-                        name="Aggregate metrics"
-                        value={run.metrics_eligible ? "Eligible" : "Withheld"}
-                      />
-                      <Pair
-                        name="Broker reconciliation"
-                        value="Not applicable · historical simulation"
-                      />
-                      <Pair
-                        name="Last historical candle available"
-                        value={run.candles.at(-1)?.available_at}
-                      />
-                      <p className="caption">
-                        No live freshness or paper account status is claimed.
-                        Imported timestamps describe historical evidence.
-                      </p>
-                    </section>
-                    <section className="panel">
-                      <span className="eyebrow">Daily-loss gates</span>
-                      <h2>Recorded session state</h2>
-                      {e!.portfolio.daily_loss_sessions.map((v: Row) => (
-                        <div className="inset" key={v.session}>
-                          <strong>{v.session}</strong>
-                          <Pair
-                            name="New entries"
-                            value={
-                              v.blocked
-                                ? `Blocked: ${words(v.reason || "unknown")}`
-                                : "Not blocked by daily-loss gate"
-                            }
-                          />
-                          <Pair
-                            name="Opening equity / loss budget"
-                            value={`${money(v.reference_equity)} / ${money(v.loss_limit)}`}
-                          />
-                        </div>
+                    </select>
+                  </label>
+                  <label>
+                    Symbol
+                    <select
+                      aria-label="Symbol"
+                      value={symbol}
+                      onChange={(e) => {
+                        setSymbol(e.target.value);
+                        setChosen("");
+                      }}
+                    >
+                      <option>SPY</option>
+                      <option>QQQ</option>
+                    </select>
+                  </label>
+                  <label>
+                    Session
+                    <select
+                      aria-label="Session"
+                      value={session}
+                      onChange={(e) => {
+                        setSession(e.target.value);
+                        setChosen("");
+                      }}
+                    >
+                      {sessions.map((v) => (
+                        <option key={v}>{v}</option>
                       ))}
-                    </section>
-                  </div>
-                  <section className="panel">
-                    <h2>Coverage by symbol and session</h2>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            {[
-                              "Session",
-                              "Symbol",
-                              "State",
-                              "Observed / expected",
-                              "First missing (UTC)",
-                            ].map((v) => (
-                              <th key={v}>{v}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {e!.coverage.map((c: Row) => (
-                            <tr key={c.symbol + c.session}>
-                              <td>{c.session}</td>
-                              <td>{c.symbol}</td>
-                              <td>{c.state}</td>
-                              <td>
-                                {c.observed_minutes} / {c.expected_minutes}
-                              </td>
-                              <td>{c.first_missing_at || "None"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                  <section className="panel">
-                    <h2>Provenance & limitations</h2>
-                    <p>{run.import_context.notice}</p>
-                    <Pair
-                      name="Imported report identity"
-                      value={
-                        run.import_context.original_evaluation_id ||
-                        "No saved report paired"
-                      }
-                    />
-                    <Pair
-                      name="Dataset SHA-256"
-                      value={e!.manifest.dataset.sha256}
-                    />
-                    <Pair
-                      name="Current engine SHA-256"
-                      value={e!.manifest.engine.source_sha256}
-                    />
-                    {e!.manifest.dataset.source_bundle && (
-                      <Pair
-                        name="Source bundle"
-                        value={`${e!.manifest.dataset.source_bundle.bundle_id} · ${e!.manifest.dataset.source_bundle.request.feed}`}
-                      />
-                    )}
-                    <ul>
-                      {[...run.limitations, ...s.limitations].map(
-                        (v: string, i: number) => (
-                          <li key={i}>{v}</li>
-                        ),
-                      )}
-                    </ul>
-                  </section>
-                </>
-              )}
-              <footer>
-                <span>
-                  Run {run.evaluation_id.slice(0, 16)} · Settings{" "}
-                  {run.applied_settings.sha256.slice(0, 12)}
-                </span>
-                <button onClick={exportRun}>Export dashboard evidence</button>
-              </footer>
-            </>
-          )}
-          <div className="design-credit">
-            Glass material adapted for the web from{" "}
-            <a
-              href="https://github.com/affaan-m/ECC/tree/main/skills/liquid-glass-design"
-              target="_blank"
-              rel="noreferrer"
-            >
-              ECC design principles
-            </a>
-            . Original CSS · no external fonts, imagery or runtime CDN.
-          </div>
-        </div>
-      </main>
+                    </select>
+                  </label>
+                </div>
+                {!run.metrics_eligible && (
+                  <button
+                    className="integrity-note"
+                    onClick={() => setPanel("Evidence")}
+                  >
+                    Incomplete evidence · performance withheld ↗
+                  </button>
+                )}
+                <CandleChart
+                  run={run}
+                  symbol={symbol}
+                  session={session}
+                  selected={selected}
+                  paperOrders={
+                    mode === "paper" && run.import_context.synthetic !== true
+                      ? paperFills
+                      : []
+                  }
+                />
+              </>
+            ) : (
+              <section className="chart-card glass empty-workspace">
+                <h2>Your market data belongs here.</h2>
+                <p>Fetch an Alpaca session or import a downloaded bundle.</p>
+                <button className="primary" onClick={() => setPanel("Data")}>
+                  Connect data ↗
+                </button>
+              </section>
+            )}
+            <div className="bottom-row">
+              <button
+                className="trade-button glass"
+                onClick={() => setPanel("Trades")}
+              >
+                Trades{" "}
+                <small>
+                  {mode === "paper"
+                    ? paper?.orders.length || 0
+                    : run?.decisions.length || 0}
+                </small>
+                <span className="arrow">↗</span>
+              </button>
+              <button
+                className="preset-button glass"
+                onClick={() => setTab("Settings")}
+              >
+                <span className="mini-dot" />
+                {run?.applied_settings.preset?.name || "ORB Reference"} ⌄
+              </button>
+              <button
+                className="glass utility-button"
+                onClick={() => setPanel("Data")}
+              >
+                Data & Alpaca ↗
+              </button>
+            </div>
+          </main>
+        )}
+        <footer className="site-footer">
+          <span>
+            {mode === "paper" ? "Paper observation" : "Historical simulation"} ·
+            order submission disabled
+          </span>
+          <button onClick={() => setPanel("Evidence")}>Details</button>
+        </footer>
+      </div>
       {importing && (
         <ImportDialog
           durable={durable}
           close={() => setImporting(false)}
-          onImported={async (id) => {
-            await refresh(id);
-            setTab("Overview");
+          onImported={async (newId) => {
+            await refresh(newId);
+            setMode("simulation");
+            setPanel("");
           }}
         />
       )}
-    </div>
+      {panel && (
+        <Modal
+          title={panel === "Data" ? "Data & Alpaca" : panel}
+          close={() => setPanel("")}
+        >
+          {error && (
+            <p role="alert" className="warning">
+              {error}
+            </p>
+          )}
+          {panel === "Logo" && (
+            <div className="orb-preview droplet-preview">
+              <Logo large />
+            </div>
+          )}
+          {panel === "Data" && (
+            <>
+              <div className="mode-switch">
+                <button
+                  aria-pressed={mode === "simulation"}
+                  onClick={() => setMode("simulation")}
+                >
+                  Simulation
+                </button>
+                <button
+                  aria-pressed={mode === "paper"}
+                  onClick={() => setMode("paper")}
+                >
+                  Paper account
+                </button>
+              </div>
+              <p className="drawer-note">
+                {status?.message || "Checking local server…"}
+              </p>
+              <button
+                className="primary"
+                disabled={busy || !status?.configured}
+                onClick={observe}
+              >
+                {busy ? "Working…" : "Refresh paper account"}
+              </button>
+              <p className="caption">
+                Read-only balances, positions and latest 500 orders. Refreshes
+                every 30 seconds while Paper account is visible. No orders are
+                submitted.
+              </p>
+              <h3 className="drawer-content-title">Fetch & simulate</h3>
+              <p className="drawer-note">
+                SPY / QQQ · completed historical sessions · ORB Reference. Apply
+                a saved preset afterwards in Settings.
+              </p>
+              <label className="field">
+                Start session
+                <input
+                  type="date"
+                  value={start}
+                  onChange={(e) => {
+                    setStart(e.target.value);
+                    if (!end) setEnd(e.target.value);
+                  }}
+                />
+              </label>
+              <label className="field">
+                End session
+                <input
+                  type="date"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                />
+              </label>
+              <label className="field">
+                Feed
+                <select value={feed} onChange={(e) => setFeed(e.target.value)}>
+                  <option value="sip">SIP</option>
+                  <option value="iex">IEX</option>
+                </select>
+              </label>
+              <button
+                className="primary"
+                disabled={busy || !start || !status?.configured}
+                onClick={fetchMarket}
+              >
+                Fetch & simulate ↗
+              </button>
+              <h3 className="drawer-content-title">Already downloaded?</h3>
+              <button onClick={() => setImporting(true)}>Import run</button>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  work(async () => {
+                    await api("/api/local-bundles/refresh", { method: "POST" });
+                    await refresh();
+                  })
+                }
+              >
+                Refresh local bundles
+              </button>
+              {local.map((r: Row, i) => (
+                <p className="drawer-note" key={i}>
+                  {r.label}: {r.error || "Imported"}
+                </p>
+              ))}
+              {!status?.configured && (
+                <details>
+                  <summary>Configure credentials</summary>
+                  <p className="drawer-note">
+                    Set APCA_API_KEY_ID and APCA_API_SECRET_KEY in the terminal
+                    environment before starting this server. Use your paper
+                    keys. Never put keys in frontend files or chat.
+                  </p>
+                </details>
+              )}
+            </>
+          )}
+          {panel === "Trades" &&
+            (mode === "paper" ? (
+              <>
+                <p className="drawer-note">
+                  Broker orders · attribution to ORB is unknown. Cumulative
+                  average fill markers appear over a matching imported
+                  symbol/session.
+                </p>
+                {paper?.history_may_be_truncated && (
+                  <p className="warning">
+                    500-order limit reached. Older orders are not shown.
+                  </p>
+                )}
+                {!paper && (
+                  <button onClick={() => setPanel("Data")}>
+                    Refresh paper account first ↗
+                  </button>
+                )}
+                {paper?.orders.length === 0 && (
+                  <p>No broker orders returned.</p>
+                )}
+                {paper?.orders.map((o: Row) => (
+                  <article className="broker-order" key={o.id}>
+                    <strong>
+                      {o.symbol} · {o.side}
+                    </strong>
+                    <span>{words(o.status)}</span>
+                    <small>
+                      {o.filled_quantity} filled @ {money(o.average_fill_price)}
+                    </small>
+                    <small>{o.filled_at || o.submitted_at}</small>
+                    {["SPY", "QQQ"].includes(o.symbol) && o.filled_at && (
+                      <button
+                        onClick={() => {
+                          const r = runs.find(
+                            (v) =>
+                              v.synthetic !== true &&
+                              v.start <= day(o.filled_at) &&
+                              v.end >= day(o.filled_at),
+                          );
+                          if (r) {
+                            if (r.id !== id)
+                              pendingView.current = {
+                                symbol: o.symbol,
+                                session: day(o.filled_at),
+                              };
+                            setId(r.id);
+                            setSymbol(o.symbol);
+                            setSession(day(o.filled_at));
+                            setChosen("");
+                            setPanel("");
+                          } else {
+                            pendingView.current = {
+                              symbol: o.symbol,
+                              session: day(o.filled_at),
+                            };
+                            setStart(day(o.filled_at));
+                            setEnd(day(o.filled_at));
+                            setPanel("Data");
+                          }
+                        }}
+                      >
+                        View / fetch matching candles ↗
+                      </button>
+                    )}
+                  </article>
+                ))}
+              </>
+            ) : (
+              <>
+                <p className="drawer-note">
+                  Every engine candidate is retained, including blocked and
+                  unresolved outcomes.
+                </p>
+                {!run?.decisions.length && <p>No candidates in this run.</p>}
+                {run?.decisions.map((d) => (
+                  <article key={d.signal_id} className="trade-detail">
+                    <button className="trade-row" onClick={() => select(d)}>
+                      <div>
+                        <strong>
+                          {d.symbol} · {words(d.status)}
+                        </strong>
+                        <small>
+                          {day(d.signal.observed_at)} ·{" "}
+                          {ny(d.signal.observed_at)} NY
+                        </small>
+                      </div>
+                      <span className="positive">{money(d.trade.net_pnl)}</span>
+                      <span>↗</span>
+                    </button>
+                    <details>
+                      <summary>{words(d.reason)}</summary>
+                      {[
+                        ["Entry", d.trade.entry_price],
+                        ["Stop", d.trade.stop],
+                        ["Target", d.trade.target],
+                        ["Exit", d.trade.exit_price],
+                        ["Quantity", d.trade.quantity],
+                        ["Fees", d.trade.fees],
+                      ].map(([k, v]) => (
+                        <Pair
+                          key={k}
+                          name={k}
+                          value={k === "Quantity" ? String(v) : money(v)}
+                        />
+                      ))}
+                      <p className="drawer-note">
+                        Signal close {money(d.signal.entry_reference)} ·{" "}
+                        {d.events
+                          .map((v: Row) => words(v.reason || v.kind))
+                          .join(" → ")}
+                      </p>
+                    </details>
+                  </article>
+                ))}
+              </>
+            ))}
+          {panel === "Account" &&
+            (mode === "paper" ? (
+              <>
+                {!paper ? (
+                  <button onClick={() => setPanel("Data")}>
+                    Connect paper account ↗
+                  </button>
+                ) : (
+                  <>
+                    <Pair name="Equity" value={money(paper.account.equity)} />
+                    <Pair name="Cash" value={money(paper.account.cash)} />
+                    <Pair
+                      name="Buying power"
+                      value={money(paper.account.buying_power)}
+                    />
+                    {paper.positions.map((p: Row) => (
+                      <Pair
+                        key={p.symbol}
+                        name={`${p.symbol} · ${p.quantity}`}
+                        value={money(p.market_value)}
+                      />
+                    ))}
+                    <p className="drawer-note">
+                      Observed {paper.observed_at}. This is not an atomic
+                      reconciliation snapshot.
+                    </p>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                {run ? (
+                  <>
+                    <Pair name="Valued equity" value={money(balance)} />
+                    <Pair
+                      name="Cash"
+                      value={money(evidence?.portfolio.account.cash)}
+                    />
+                    <Pair name="Return" value={pct(summary?.total_return)} />
+                    <Pair
+                      name="Max drawdown"
+                      value={pct(summary?.max_drawdown)}
+                    />
+                    <Pair
+                      name="Closed subset P&L"
+                      value={money(summary?.closed_subset.net_pnl)}
+                    />
+                    <Equity samples={samples} />
+                  </>
+                ) : (
+                  <p>No simulation selected.</p>
+                )}
+              </>
+            ))}
+          {panel === "Evidence" && (
+            <>
+              <button onClick={() => setPanel("Research")}>
+                Research jobs ↗
+              </button>
+              {run && (
+                <>
+                  <p className="drawer-note">
+                    {run.import_context.synthetic ? "Invented test data. " : ""}
+                    {run.metrics_eligible
+                      ? "Complete within declared scope."
+                      : "Missing evidence: aggregate performance is withheld."}{" "}
+                    Provider authenticity and point-in-time availability remain
+                    unverified.
+                  </p>
+                  <Pair
+                    name="Costs / side"
+                    value={`${config.slippage_bps} bps + ${config.fee_per_share} USD/share`}
+                  />
+                  <p className="drawer-note">
+                    Idealised full fills. Assumed costs are not calibrated
+                    execution evidence.
+                  </p>
+                  <button onClick={exportRun}>Export dashboard evidence</button>
+                  <details>
+                    <summary>Data health & exact settings</summary>
+                    <pre>
+                      {JSON.stringify(
+                        {
+                          health: run.health,
+                          settings: run.applied_settings,
+                          coverage: evidence?.coverage,
+                        },
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </>
+              )}
+            </>
+          )}
+          {panel === "Research" && (
+            <ResearchJobs
+              onOpen={async (newId) => {
+                await refresh(newId);
+                setPanel("");
+                setTab("Workspace");
+              }}
+            />
+          )}
+        </Modal>
+      )}
+    </>
   );
 }
 createRoot(document.getElementById("root")!).render(<App />);
