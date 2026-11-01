@@ -34,6 +34,12 @@ def scenarios():
     return {'complete_trade': complete, 'known_skip': skipped, 'missing_entry': incomplete}
 
 
+def comparison_scenario():
+    """Invented Fri/Mon/Tue source for inspecting the comparison controls."""
+    first=scenarios()['complete_trade']
+    return [replace(b,start=b.start+timedelta(days=days)) for days in (0,3,4) for b in first]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out-dir', type=Path, required=True)

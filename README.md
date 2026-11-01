@@ -73,7 +73,9 @@ Monday/Wednesday/Friday entry schedule with otherwise identical baseline rules;
 custom presets support NY entry weekdays and planned target R. These are
 research variants, not claims of safer or improved returns. Imports, snapshots
 and frozen preset jobs now persist in the local research archive; see
-[durable research and queue controls](docs/durable-research.md). Saved v3 variants now support entry/concurrency caps (1–2), backed by the
+[durable research and queue controls](docs/durable-research.md).
+Schedule/cost protocols now support retrospective development/validation
+comparisons, all trial outcomes and exports; see [comparison semantics](docs/schedule-cost-comparisons.md). Saved v3 variants now support entry/concurrency caps (1–2), backed by the
 shared engine and restart-safe offline coordinator. See [capacity semantics](docs/entry-capacity.md).
 See [preset controls and CLI](docs/research-presets.md) and
 [weekday/target variants](docs/trading-profile-variants.md).

@@ -1931,7 +1931,8 @@ body {
   align-items: end;
   margin: 22px 0;
 }
-.preset-panel label {
+.preset-panel label,
+.comparison-panel label {
   font-size: 11px;
   color: #9fb2cc;
   display: flex;
@@ -1939,6 +1940,7 @@ body {
   gap: 8px;
 }
 .preset-panel input:not([type="checkbox"]),
+.comparison-panel input:not([type="checkbox"]),
 .import-dialog input:not([type="checkbox"]) {
   height: 40px;
   background: #0b1323b0;
@@ -1974,7 +1976,8 @@ body {
   padding: 18px;
   margin: 20px 0;
 }
-.preset-panel .check {
+.preset-panel .check,
+.comparison-panel .check {
   flex-direction: row;
   align-items: center;
   font-size: 11px;
@@ -1987,6 +1990,8 @@ body {
   margin: 20px 0;
 }
 .preset-actions button,
+.comparison-panel > button,
+.comparison-panel td button,
 .panel .controls button {
   padding: 10px 13px;
   border: 1px solid #a4c0e134;
@@ -2145,3 +2150,28 @@ td {
     font-size: 20px;
   }
 }
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.table-scroll table {
+  min-width: 950px;
+}
+
+.comparison-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.comparison-panel input,
+.comparison-panel select {
+  min-width: 0;
+  max-width: 100%;
+}
+.comparison-panel .view-controls label {
+  max-width: 100%;
+}
+
+.research-drawer { width: min(1120px, 100%); }
+
+.comparison-panel table { font-size: 12px; }
+.comparison-panel .table-scroll table { min-width: 1200px; }

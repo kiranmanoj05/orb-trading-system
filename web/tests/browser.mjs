@@ -1,1 +1,1 @@
-import './workspace-browser.mjs';
+import "./workspace-browser.mjs";

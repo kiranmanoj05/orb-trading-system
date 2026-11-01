@@ -95,7 +95,19 @@ class ResearchStore:
                         'error TEXT, claim TEXT)')
                     self.db.execute(f'PRAGMA application_id={APP_ID}')
                     self.db.execute('PRAGMA user_version=1')
-                elif identity != APP_ID or version != 1 or tables != {'sources', 'runs', 'jobs'}:
+                    identity, version, tables = APP_ID, 1, {'sources','runs','jobs'}
+                if identity==APP_ID and version in (1,2):
+                    expected={'sources':{'id','payload','fingerprint'},
+                        'runs':{'id','source_id','snapshot','fingerprint','created_at'},
+                        'jobs':{'sequence','id','request_key','input','fingerprint','state','created_at','started_at','finished_at','result_id','error','claim'}}
+                    if version==2: expected['comparisons']={'id','job_id','snapshot','fingerprint','created_at'}
+                    for table,columns in expected.items():
+                        if {r[1] for r in self.db.execute(f'PRAGMA table_info({table})')}!=columns:
+                            raise ResearchIntegrityError('unrecognised research schema; no migration attempted')
+                if identity == APP_ID and version == 1 and tables == {'sources','runs','jobs'}:
+                    self.db.execute('CREATE TABLE comparisons (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id), snapshot TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at TEXT NOT NULL)')
+                    self.db.execute('PRAGMA user_version=2')
+                elif identity != APP_ID or version != 2 or tables != {'sources','runs','jobs','comparisons'}:
                     raise ResearchIntegrityError('unrecognised research database; no migration attempted')
             self.db.execute('PRAGMA journal_mode=DELETE')
         except BaseException:
@@ -145,6 +157,7 @@ class ResearchStore:
         total = self.db.execute('SELECT COALESCE(SUM(length(CAST(snapshot AS BLOB))),0) FROM runs').fetchone()[0]
         total += self.db.execute('SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM sources').fetchone()[0]
         total += self.db.execute('SELECT COALESCE(SUM(length(CAST(input AS BLOB))),0) FROM jobs').fetchone()[0]
+        total += self.db.execute('SELECT COALESCE(SUM(length(CAST(snapshot AS BLOB))),0) FROM comparisons').fetchone()[0]
         if total > MAX_ARCHIVE_BYTES:
             raise ResearchConflict('research archive byte limit reached; preserve/export evidence before maintenance')
 
@@ -220,13 +233,39 @@ class ResearchStore:
             self._budget()
             return job
 
+    def enqueue_comparison(self, source_run_id, plan):
+        from orb.comparison import validate_plan
+        with self.transaction():
+            original=self.get_run(source_run_id)
+            frozen=validate_plan(plan, original)
+            context=engine_context()
+            job=self._enqueue({'kind':'comparison','source_run_id':source_run_id,'plan':frozen,
+                               'engine':_digest(context),'engine_context':context})
+            self._budget()
+            return job
+
+    def get_comparison(self, identity):
+        with self.lock:
+            row=self.db.execute('SELECT * FROM comparisons WHERE id=?',(identity,)).fetchone()
+            if row is None: raise KeyError('comparison not found')
+            result=_read(row['snapshot'],row['fingerprint'])
+            if result['comparison_id']!=identity or _digest(result['manifest'])!=identity:
+                raise ResearchIntegrityError('comparison identity mismatch')
+            return result
+
+    def list_comparisons(self):
+        with self.lock:
+            return [self.get_comparison(r[0]) for r in self.db.execute('SELECT id FROM comparisons ORDER BY rowid DESC')]
+
     def get_job(self, identity):
         with self.lock:
             r = self.db.execute('SELECT * FROM jobs WHERE id=?', (identity,)).fetchone()
             if r is None: raise KeyError('research job not found')
             request = _read(r['input'], r['fingerprint'])
+            comparison=self.db.execute('SELECT id FROM comparisons WHERE job_id=?',(identity,)).fetchone()
             return {k:r[k] for k in ('id','state','created_at','started_at','finished_at','result_id','error')} | {
-                'request':request, 'engine_current':request['engine']==engine_identity()}
+                'request':request, 'engine_current':request['engine']==engine_identity(),
+                **({'comparison_id':comparison['id']} if comparison else {})}
 
     def list_jobs(self):
         with self.lock:
@@ -276,14 +315,24 @@ class ResearchStore:
                     raise ResearchConflict('engine_changed')
                 self.source(request['source_run_id'])  # Validate retained original evidence too.
                 original = self.get_run(request['source_run_id'])
-                run = apply_preset(original, request['preset'])
+                comparison=None
+                if request['kind']=='comparison':
+                    from orb.comparison import compare
+                    comparison,runs=compare(original,request['plan'])
+                else:
+                    runs=[apply_preset(original, request['preset'])]
                 with self.transaction():
                     if engine_identity()!=request['engine']:
                         raise ResearchConflict('engine_changed')
                     parent = self.db.execute('SELECT source_id FROM runs WHERE id=?', (request['source_run_id'],)).fetchone()
-                    self._put_run(run, parent['source_id'])
+                    for run in runs:
+                        self._put_run(run, parent['source_id'])
+                    if comparison is not None:
+                        text=_json(comparison)
+                        self.db.execute('INSERT INTO comparisons VALUES(?,?,?,?,?)',
+                            (comparison['comparison_id'],identity,text,sha256(text.encode()).hexdigest(),_now()))
                     self.db.execute("UPDATE jobs SET state='succeeded',result_id=?,finished_at=?,claim=NULL WHERE id=? AND claim=?",
-                        (run['evaluation_id'],_now(),identity,claim))
+                        (runs[0]['evaluation_id'] if comparison is None else None,_now(),identity,claim))
                     self._budget()
             except (ValueError, KeyError, TypeError, sqlite3.Error):
                 # No raw source/prices, paths or exception strings in job errors.
@@ -296,14 +345,26 @@ class ResearchStore:
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--db',type=Path,required=True)
-    parser.add_argument('command',choices=('list','jobs','work-one','recover','retry','export'))
+    parser.add_argument('command',choices=('list','jobs','work-one','recover','retry','export','comparisons','queue-comparison','export-comparison'))
     parser.add_argument('--id')
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--plan',type=Path)
     args=parser.parse_args()
     try:
         if not args.db.is_file(): raise ValueError('existing research database required')
         with ResearchStore(args.db) as store:
-            if args.command=='list': result=[r['evaluation_id'] for r in store.list_runs()]
+            if args.command=='comparisons': result=store.list_comparisons()
+            elif args.command=='queue-comparison':
+                if args.plan is None or args.plan.stat().st_size>32768: raise ValueError('bounded --plan JSON required')
+                result=store.enqueue_comparison(args.id,json.loads(args.plan.read_text(),object_pairs_hook=_object,parse_constant=_invalid_constant))
+            elif args.command=='export-comparison':
+                from orb.comparison import render_comparison
+                if args.output is None: raise ValueError('export-comparison requires --output and --id')
+                result=store.get_comparison(args.id)
+                with args.output.open('x',encoding='utf-8') as output:
+                    output.write(render_comparison(result) if args.output.suffix=='.md' else json.dumps(result,indent=2)+'\n')
+                result={'exported':args.id}
+            elif args.command=='list': result=[r['evaluation_id'] for r in store.list_runs()]
             elif args.command=='jobs': result=store.list_jobs()
             elif args.command=='work-one': result=store.execute(args.id)
             elif args.command=='recover': result={'interrupted':store.recover()}
