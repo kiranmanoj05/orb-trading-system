@@ -1,4 +1,4 @@
-"""Loopback-only historical research API. No broker or order interfaces."""
+"""Loopback research API with bounded read-only Alpaca access; never orders."""
 
 import argparse
 from contextlib import asynccontextmanager
@@ -8,6 +8,13 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
+from orb.dashboard_alpaca import connection_status, observe_paper, fetch_run, local_bundles
+from orb.acquisition import AcquisitionError
+from orb.paper_snapshot import PaperSnapshotError
+from threading import Lock
+from orb.profile_runs import apply_preset
+
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from orb.dashboard import build_dashboard_run
@@ -19,7 +26,7 @@ from orb.research_settings import settings_contract
 from orb.research_store import ResearchStore, ResearchConflict, ResearchIntegrityError
 
 
-def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None):
+def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None, data_dir=None):
     """Local inspection service with an optional persistent research archive.
 
     Host validation prevents browser DNS rebinding. Cross-origin requests and
@@ -58,6 +65,21 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
                 for c in run['candles'])
             research.import_run(run, {'kind':'csv','source':source,'label':run['evidence']['manifest']['dataset']['label']})
     assets = Path(web_dir).resolve() if web_dir else None
+    provider_lock = Lock()
+    local_imports = []
+    def sync_bundles():
+        records = []
+        for item in local_bundles(data_dir) if data_dir is not None else []:
+            if 'error' in item:
+                records.append({'label': item['label'], 'error': item['error']}); continue
+            try:
+                job = research.import_run(item['run'], item['payload'])
+                records.append({'label': item['label'], 'id': job['result_id']})
+            except ResearchConflict:
+                records.append({'label': item['label'], 'error': 'Research archive capacity reached.'})
+        local_imports[:] = records
+        return records
+    sync_bundles()
     host = f'127.0.0.1:{port}'
     origin = f'http://{host}'
 
@@ -69,8 +91,8 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         response.headers.update({
             'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
             'Referrer-Policy': 'no-referrer',
-            'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; "
-                "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
+            'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"})
         return response
 
     async def read_json(request, limit=MAX_BYTES):
@@ -92,6 +114,41 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if isinstance(exc, KeyError):
             raise HTTPException(404, 'preset version not found') from None
         raise HTTPException(422, 'invalid preset request or unsupported settings') from None
+
+    @app.get('/api/alpaca/status')
+    async def alpaca_status():
+        return connection_status()
+
+    @app.get('/api/local-bundles')
+    async def list_local_bundles(): return {'imports': local_imports}
+
+    @app.post('/api/local-bundles/refresh')
+    async def refresh_local_bundles(request: Request):
+        await empty_command(request)
+        return {'imports': await run_in_threadpool(sync_bundles)}
+
+    @app.post('/api/alpaca/observe')
+    async def paper_observation(request: Request):
+        await empty_command(request)
+        if not provider_lock.acquire(blocking=False): raise HTTPException(409, 'An Alpaca request is already running.')
+        try: return await run_in_threadpool(observe_paper)
+        except (AcquisitionError, PaperSnapshotError) as exc: raise HTTPException(502, str(exc)) from None
+        finally: provider_lock.release()
+
+    @app.post('/api/alpaca/fetch', status_code=201)
+    async def fetch_alpaca(request: Request):
+        p = await read_json(request, 4096)
+        if not isinstance(p, dict) or set(p) != {'start_session', 'end_session', 'feed'}:
+            raise HTTPException(422, 'Provide start_session, end_session and feed (sip/iex).')
+        if not provider_lock.acquire(blocking=False): raise HTTPException(409, 'An Alpaca request is already running.')
+        try:
+            run, payload = await run_in_threadpool(fetch_run, p['start_session'], p['end_session'], p['feed'])
+            job = research.import_run(run, payload)
+            return {'id': job['result_id']}
+        except AcquisitionError as exc: raise HTTPException(502, str(exc)) from None
+        except ResearchConflict as exc: raise HTTPException(409, str(exc)) from None
+        except (ValueError, TypeError, KeyError): raise HTTPException(422, 'Acquired data could not be evaluated within import bounds.') from None
+        finally: provider_lock.release()
 
     @app.get('/api/presets')
     async def list_presets():
@@ -237,7 +294,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
     @app.get('/assets/{name}')
     async def asset(name: str):
         # Explicit asset allowlist, never expose project/state files.
-        if not assets or name not in ('app.js', 'app.css', 'THIRD_PARTY_NOTICES.txt') or not (assets / name).is_file():
+        if not assets or name not in ('app.js', 'app.css', 'THIRD_PARTY_NOTICES.txt', 'droplet.mp4', 'droplet-poster.jpg', 'wallpaper-default.mp4', 'wallpaper-poster.png', 'nocturne.svg') or not (assets / name).is_file():
             raise HTTPException(404, 'asset not found')
         return FileResponse(assets / name)
 
@@ -251,11 +308,12 @@ def main():
     parser.add_argument('--web-dir', type=Path, default=Path('web/build'))
     parser.add_argument('--preset-db', type=Path, default=Path('results/dashboard-presets.sqlite'))
     parser.add_argument('--research-db', type=Path, default=Path('results/dashboard-research.sqlite'))
+    parser.add_argument('--data-dir', type=Path, default=Path('data'), help='discover complete bundles in immediate child folders')
     args = parser.parse_args()
     if not (args.web_dir / 'index.html').is_file():
         parser.error('frontend missing: run npm ci && npm run build in web/ first')
     import uvicorn
-    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db),
+    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db, data_dir=args.data_dir),
                 host='127.0.0.1', port=args.port, workers=1, access_log=False)
 
 

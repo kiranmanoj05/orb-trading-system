@@ -4,6 +4,7 @@ await mkdir("build", { recursive: true });
 await build({
   entryPoints: ["src/app.tsx"],
   bundle: true,
+  external: ["/assets/*"],
   minify: true,
   format: "esm",
   outdir: "build",
@@ -26,3 +27,11 @@ await writeFile(
       )
     ).join("\n\n"),
 );
+for (const name of [
+  "droplet.mp4",
+  "droplet-poster.jpg",
+  "wallpaper-default.mp4",
+  "wallpaper-poster.png",
+  "nocturne.svg",
+])
+  await copyFile(`public/${name}`, `build/${name}`);
