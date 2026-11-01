@@ -53,7 +53,9 @@ export default function Presets({
   runId,
   applied,
   onApplied,
+  appliedNote,
 }: {
+  appliedNote?: string;
   runId?: string;
   applied?: { id: string; version: number; name: string };
   onApplied: (id: string) => Promise<void>;
@@ -205,9 +207,10 @@ export default function Presets({
           <div className="inset">
             <strong>
               Applied to selected run:{" "}
-              {applied
-                ? `${applied.name} · v${applied.version}`
-                : "Original imported settings (no saved preset)"}
+              {appliedNote ||
+                (applied
+                  ? `${applied.name} · v${applied.version}`
+                  : "Original imported settings (no saved preset)")}
             </strong>
             <p>
               Loading or saving a preset does not change this run. Apply a saved

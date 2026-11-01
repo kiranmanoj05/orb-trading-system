@@ -96,7 +96,7 @@ try {
   await page
     .getByRole("button", { name: "View balance ↗", exact: true })
     .click();
-  assert.match(await page.locator("dialog").textContent(), /Unavailable/);
+  assert.match(await page.locator("dialog[open]").textContent(), /Unavailable/);
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   console.log("PASS incomplete results do not fabricate metrics");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -128,13 +128,11 @@ try {
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   console.log("PASS absent backend credentials are explicit");
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
-  await page
-    .locator("input[type=file]")
-    .setInputFiles({
-      name: "original.png",
-      mimeType: "image/png",
-      buffer: await readFile(root + "/web/public/wallpaper-poster.png"),
-    });
+  await page.locator("input[type=file]").setInputFiles({
+    name: "original.png",
+    mimeType: "image/png",
+    buffer: await readFile(root + "/web/public/wallpaper-poster.png"),
+  });
   await page.getByText("Your saved image ↗", { exact: true }).waitFor();
   await page.reload();
   await page.getByRole("button", { name: "Appearance", exact: true }).click();

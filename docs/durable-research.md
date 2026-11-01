@@ -78,7 +78,8 @@ Imports still support 10 MiB requests, 20,000 bars and 31 calendar days. The
 file-backed archive supports 100 runs, 1000 job records and 256 MiB of retained
 source/snapshot/job-input text (not a hard on-disk file-size guarantee). Limits
 are checked inside transactions; failed capacity writes roll back. No automatic
-pruning, deletion API or database migration is provided. Export/preserve evidence
+pruning or deletion API is provided. The comparison increment adds a checked,
+transactional schema-1-to-2 upgrade; account/preset files are untouched. Export/preserve evidence
 before deliberate maintenance. Back up a closed database as a file; this release
 does not claim online backup, corruption repair or power-loss certification.
 
@@ -115,3 +116,8 @@ evaluation failure and retry, preserve earlier runs and check reflow. All prices
 are invented acceptance data. No real-market result or provider verification is
 claimed. Next: cost sensitivity and chronological comparison/holdout reporting,
 plus remaining timing/stop and paper reconciliation acceptance work.
+
+
+The 31 October increment adds [schedule/cost comparison jobs](schedule-cost-comparisons.md)
+to the same worker, with atomic child runs/report publication. Reports explicitly
+label retrospective unsealed partitions and unavailable uncertainty/benchmarks.

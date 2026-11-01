@@ -7,6 +7,7 @@ type Job = {
   started_at: string | null;
   finished_at: string | null;
   result_id: string | null;
+  comparison_id?: string;
   error: string | null;
   engine_current: boolean;
   request: {
@@ -25,8 +26,10 @@ async function request(path: string, post = false) {
 }
 export default function ResearchJobs({
   onOpen,
+  onComparison,
 }: {
   onOpen: (id: string) => Promise<void>;
+  onComparison?: (id: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]),
     [durable, setDurable] = useState(false),
@@ -69,17 +72,15 @@ export default function ResearchJobs({
       <div className="section-head">
         <div>
           <span className="eyebrow">Reproducible local research</span>
-          <h2>Keep the evidence. Freeze the experiment.</h2>
+          <h2>Research jobs</h2>
         </div>
         <span className="pill">
           {durable ? "Runs & jobs saved locally" : "Temporary research archive"}
         </span>
       </div>
       <p>
-        Queue an exact saved version in Applied settings. Run one queued job
-        here when ready. This release has no background scheduler or data
-        acquisition. Server restarts retain file-backed evidence; interrupted
-        work is never silently retried.
+        Queue a saved version in Settings or a comparison from Evidence. Run it
+        here when ready. Interrupted work is never silently retried.
       </p>
       <div className="controls">
         <button disabled={busy} onClick={() => action("/api/jobs/work-one")}>
@@ -117,7 +118,9 @@ export default function ResearchJobs({
               <strong>
                 {job.request.preset
                   ? `${job.request.preset.name} · v${job.request.preset.version}`
-                  : "Validated source import"}
+                  : job.request.kind === "comparison"
+                    ? "Schedule / cost comparison"
+                    : "Validated source import"}
               </strong>
               <span className="pill">{job.state}</span>
             </div>
@@ -143,6 +146,11 @@ export default function ResearchJobs({
               </p>
             )}
             <div className="controls">
+              {job.comparison_id && (
+                <button onClick={() => onComparison?.(job.comparison_id!)}>
+                  Open comparison {job.comparison_id.slice(0, 8)}
+                </button>
+              )}
               {job.result_id && (
                 <button
                   disabled={busy}

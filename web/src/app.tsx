@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
 import ResearchJobs from "./ResearchJobs";
+import Comparisons from "./Comparisons";
 import CandleChart from "./CandleChart";
 import Appearance, { Logo } from "./Appearance";
 
@@ -21,6 +22,7 @@ type Run = {
 };
 type Listing = {
   preset?: { name: string; version: number };
+  trial?: { name: string; version: number; period: string; cost: string };
   id: string;
   label: string;
   complete: boolean;
@@ -321,7 +323,11 @@ function Modal({
     ref.current?.showModal();
   }, []);
   return (
-    <dialog ref={ref} className="glass drawer" onCancel={close}>
+    <dialog
+      ref={ref}
+      className={`glass drawer ${["Research", "Comparisons"].includes(title) ? "research-drawer" : ""}`}
+      onCancel={close}
+    >
       <div className="drawer-head">
         <h2>{title}</h2>
         <button className="icon" aria-label="Close panel" onClick={close}>
@@ -354,7 +360,8 @@ function App() {
     [feed, setFeed] = useState("sip"),
     [start, setStart] = useState(""),
     [end, setEnd] = useState(""),
-    [local, setLocal] = useState<Row[]>([]);
+    [local, setLocal] = useState<Row[]>([]),
+    [comparisonId, setComparisonId] = useState("");
   async function refresh(preferred?: string) {
     const [rows, storage, connection, bundles] = await Promise.all([
       api("/api/runs"),
@@ -556,6 +563,11 @@ function App() {
             <Presets
               runId={id || undefined}
               applied={run?.applied_settings.preset}
+              appliedNote={
+                run?.applied_settings.comparison_trial
+                  ? `Comparison trial: ${run.applied_settings.comparison_trial.preset.name} v${run.applied_settings.comparison_trial.preset.version}; cost override ${run.applied_settings.comparison_trial.cost_scenario.name}. Effective values are in Details; saved preset unchanged.`
+                  : undefined
+              }
               onApplied={async (newId) => {
                 await refresh(newId);
                 setMode("simulation");
@@ -625,7 +637,13 @@ function App() {
                       {runs.map((r) => (
                         <option value={r.id} key={r.id}>
                           {r.synthetic ? "SYNTHETIC · " : ""}
-                          {r.label}
+                          {r.preset
+                            ? `${r.preset.name} · v${r.preset.version} · `
+                            : r.trial
+                              ? `${r.trial.name} · v${r.trial.version} · ${r.trial.period} · ${r.trial.cost} · `
+                              : ""}
+                          {r.label} · {r.start}
+                          {r.end !== r.start ? ` → ${r.end}` : ""}
                         </option>
                       ))}
                     </select>
@@ -1027,8 +1045,26 @@ function App() {
               <button onClick={() => setPanel("Research")}>
                 Research jobs ↗
               </button>
+              <button
+                onClick={() => {
+                  setComparisonId("");
+                  setPanel("Comparisons");
+                }}
+              >
+                Comparisons ↗
+              </button>
               {run && (
                 <>
+                  {run.applied_settings.comparison_trial && (
+                    <p className="notice">
+                      Comparison trial:{" "}
+                      {run.applied_settings.comparison_trial.preset.name} v
+                      {run.applied_settings.comparison_trial.preset.version};
+                      cost override{" "}
+                      {run.applied_settings.comparison_trial.cost_scenario.name}
+                      . Effective values below; saved preset unchanged.
+                    </p>
+                  )}
                   <p className="drawer-note">
                     {run.import_context.synthetic ? "Invented test data. " : ""}
                     {run.metrics_eligible
@@ -1064,10 +1100,32 @@ function App() {
               )}
             </>
           )}
+          {panel === "Comparisons" && (
+            <>
+              <button onClick={() => setPanel("Research")}>
+                Research jobs ↗
+              </button>
+              <Comparisons
+                runId={id || undefined}
+                comparisonId={comparisonId}
+                onOpen={async (newId) => {
+                  await refresh(newId);
+                  setMode("simulation");
+                  setPanel("");
+                  setTab("Workspace");
+                }}
+              />
+            </>
+          )}
           {panel === "Research" && (
             <ResearchJobs
+              onComparison={(newId) => {
+                setComparisonId(newId);
+                setPanel("Comparisons");
+              }}
               onOpen={async (newId) => {
                 await refresh(newId);
+                setMode("simulation");
                 setPanel("");
                 setTab("Workspace");
               }}
