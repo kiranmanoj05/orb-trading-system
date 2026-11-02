@@ -275,7 +275,14 @@ class PaperEngine:
         allocation = min(self.settings.initial_cash, equity, cash)
         anchor_key = 'equity:' + str(today)
         anchor = decimal(self.meta(anchor_key) or self.meta(anchor_key, str(equity)))
-        if equity <= anchor - min(anchor, self.settings.initial_cash) * self.settings.daily_loss_fraction:
+        budget_key = 'loss-budget:' + str(today)
+        requested_budget = min(anchor, self.settings.initial_cash) * self.settings.daily_loss_fraction
+        budget = min(decimal(self.meta(budget_key) or str(requested_budget)), requested_budget)
+        self.meta(budget_key, str(budget))
+        loss_key = 'loss-blocked:' + str(today)
+        if equity <= anchor - budget:
+            self.meta(loss_key, 'yes')
+        if self.meta(loss_key):
             self.message = 'Daily loss threshold reached. New entries blocked.'
             return
         bars = self.update_market(session, now)
