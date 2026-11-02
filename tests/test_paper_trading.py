@@ -402,3 +402,61 @@ def test_request_crossing_entry_cutoff_cannot_submit(tmp_path, monkeypatch):
         e.tick(now)
     assert not b.posts and not e.status()['attempts']
     e.close()
+
+
+def test_daily_loss_block_survives_equity_recovery_restart_and_looser_preset(tmp_path):
+    e, b = engine(tmp_path)
+    # Record the opening observation without emitting a candidate.
+    last = b.series[-1]
+    b.series[-1] = Bar('SPY', last.start, D('99'), D('100'), D('98'), D('99'), 300)
+    e.tick(NOW)
+    b.account['equity'] = b.account['cash'] = '98400'
+    e.tick(NOW)
+    assert 'Daily loss' in e.message and not b.posts
+    e.close()
+    e, b = engine(tmp_path, b)
+    e.settings = e.validate(PresetStore.paper('paper-active'), 'iex')
+    b.account['equity'] = b.account['cash'] = '100000'
+    b.series[-1] = last
+    e.tick(NOW)
+    assert 'Daily loss' in e.message and not b.posts
+    assert e.meta('loss-budget:' + str(NOW.date())) == '1500.000'
+    e.close()
+
+
+def test_day_loss_budget_can_tighten_but_never_widen_before_breach(tmp_path):
+    e, b = engine(tmp_path)
+    last = b.series[-1]
+    b.series[-1] = Bar('SPY', last.start, D('99'), D('100'), D('98'), D('99'), 300)
+    e.tick(NOW)
+    e.settings = e.validate(PresetStore.paper('paper-calm'), 'iex')
+    e.tick(NOW)
+    e.settings = e.validate(PresetStore.paper('paper-active'), 'iex')
+    b.account['equity'] = b.account['cash'] = '98900'
+    b.series[-1] = last
+    e.tick(NOW)
+    assert 'Daily loss' in e.message and not b.posts
+    assert D(e.meta('loss-budget:' + str(NOW.date()))) == D('1000')
+    e.close()
+
+
+def test_loss_block_is_ny_session_scoped_and_never_blocks_existing_management(tmp_path):
+    e, b = engine(tmp_path)
+    e.tick(NOW)
+    e.meta('loss-blocked:' + str(NOW.date()), 'yes')
+    b.parent.update(status='partially_filled', filled_qty='4')
+    e.tick(NOW)
+    assert b.deletes and len(b.posts) == 1
+    # A separate clean state has yesterday's latch but today's new session.
+    e.close()
+    fresh = tmp_path / 'next-state'
+    fresh.mkdir()
+    e, b = engine(fresh)
+    e.meta('loss-blocked:' + str(NOW.date()), 'yes')
+    tomorrow = NOW + timedelta(days=1)
+    b.clock['timestamp'] = b.quote['t'] = tomorrow.isoformat()
+    b.series = [Bar(x.symbol, x.start + timedelta(days=1), x.open, x.high, x.low, x.close, x.volume)
+                for x in b.series]
+    e.tick(tomorrow)
+    assert len(b.posts) == 1
+    e.close()

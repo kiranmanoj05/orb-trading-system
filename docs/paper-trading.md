@@ -65,7 +65,10 @@ freezes that exact record; later preset edits do not change the running worker.
   this state path. This is a bounded broker-authoritative adapter, not integration
   of the more general offline coordinator/reconciliation ledgers.
 - Daily-loss anchor is equity at the first eligible worker observation that day;
-  account changes before that observation are not measured. With one attempt/day
+  account changes before that observation are not measured. The dollar budget can
+  tighten but never widen during that NY session. A breach latches durably through
+  equity recovery, restart and preset changes; position management continues and
+  a later NY session gets a distinct anchor/block. With one attempt/day
   it is a new-entry block, not a mechanism to liquidate positions or stop losses.
 
 ## Clear chart modes
