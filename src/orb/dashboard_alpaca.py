@@ -63,7 +63,7 @@ def observe_paper(*, credentials=None, transport=None):
                'Accept': 'application/json', 'User-Agent': 'orb-dashboard-observation/1'}
     started = datetime.now(timezone.utc).isoformat()
     resources = ('/v2/account', '/v2/positions', '/v2/orders?' + urlencode(
-        {'status': 'all', 'limit': 500, 'direction': 'desc', 'nested': 'false'}))
+        {'status': 'all', 'limit': 500, 'direction': 'desc', 'nested': 'true'}))
     decoded = []
     for path in resources:
         response = transport(BASE_URL + path, headers, 10, 2_000_000)
@@ -85,17 +85,24 @@ def observe_paper(*, credentials=None, transport=None):
         clean_positions = [dict(symbol=text(p['symbol'], 24), quantity=number(p['qty']),
                                 market_value=number(p.get('market_value'), nullable=True),
                                 unrealized_pl=number(p.get('unrealized_pl'), nullable=True)) for p in positions]
-        clean_orders = [dict(id=sha256(text(o['id'], 128).encode()).hexdigest()[:24],
-                             symbol=text(o['symbol'], 24), side=text(o['side'], 16), status=text(o['status'], 48),
-                             quantity=number(o.get('qty'), nullable=True), filled_quantity=number(o['filled_qty']),
-                             average_fill_price=number(o.get('filled_avg_price'), nullable=True),
-                             submitted_at=stamp(o.get('submitted_at')), filled_at=stamp(o.get('filled_at')),
-                             attribution='unattributed_broker_order') for o in orders]
+        clean_orders = []
+        for parent in orders:
+            legs = parent.get('legs') or []
+            if not isinstance(legs, list) or len(legs) > 2:
+                raise PaperSnapshotError('invalid paper bracket legs')
+            for o in [parent, *legs]:
+                clean_orders.append(dict(id=sha256(text(o['id'], 128).encode()).hexdigest()[:24],
+                    symbol=text(o['symbol'], 24), side=text(o['side'], 16), status=text(o['status'], 48),
+                    quantity=number(o.get('qty'), nullable=True), filled_quantity=number(o['filled_qty']),
+                    average_fill_price=number(o.get('filled_avg_price'), nullable=True),
+                    submitted_at=stamp(o.get('submitted_at')), filled_at=stamp(o.get('filled_at')),
+                    attribution='unattributed_broker_order'))
+        clean_orders = list({o['id']: o for o in clean_orders}.values())
     except (KeyError, TypeError, AttributeError): raise PaperSnapshotError('incomplete paper observation') from None
     return {'mode': 'paper_observation', 'provider': 'alpaca', 'connected': True,
             'observed_from': started, 'observed_at': datetime.now(timezone.utc).isoformat(),
             'account': summary, 'positions': clean_positions, 'orders': clean_orders,
-            'order_limit': 500, 'history_may_be_truncated': len(orders) == 500,
+            'order_limit': 500, 'includes_bracket_legs': True, 'history_may_be_truncated': len(orders) == 500,
             'execution_enabled': False, 'orders_submitted': False,
             'notice': 'Latest 500 broker orders; cumulative average fills, not individual executions. Not an atomic recovery snapshot. ORB attribution is unknown.'}
 

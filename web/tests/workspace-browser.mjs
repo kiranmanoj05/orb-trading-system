@@ -1,3 +1,4 @@
+import { researchFixtures, simulationView } from "./research-view.mjs";
 /** Local full-stack regression runner for the redesigned workspace. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -20,6 +21,8 @@ const server = spawn(
     String(port),
     "--web-dir",
     root + "/web/build",
+    "--paper-db",
+    temp + "/paper.sqlite",
     "--preset-db",
     temp + "/presets.sqlite",
     "--research-db",
@@ -62,7 +65,9 @@ try {
     }),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await researchFixtures(page);
   await page.goto(base);
+  await simulationView(page);
   await page.getByLabel("Selected run").waitFor();
   assert.equal(
     await page.getByRole("navigation").getByRole("button").count(),
@@ -135,6 +140,7 @@ try {
   });
   await page.getByText("Your saved image ↗", { exact: true }).waitFor();
   await page.reload();
+  await simulationView(page);
   await page.getByRole("button", { name: "Appearance", exact: true }).click();
   await page.getByText("Your saved image ↗", { exact: true }).waitFor();
   await page

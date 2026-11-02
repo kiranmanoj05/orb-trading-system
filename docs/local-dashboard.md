@@ -1,5 +1,11 @@
 # Local historical dashboard
 
+> Update: [Paper execution v1](paper-trading.md) supersedes the original
+> observation-only boundary described below. Paper view now has its own current
+> session chart, no backtest overlays, and hidden synthetic examples. Submission
+> requires explicitly starting the paper worker in Settings.
+
+
 ## Boundary and design
 
 This is a real React/TypeScript client of the Python research engine, not an

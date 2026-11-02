@@ -1,4 +1,4 @@
-"""Loopback research API with bounded read-only Alpaca access; never orders."""
+"""Loopback research API with paper-only execution and historical research."""
 
 import argparse
 from contextlib import asynccontextmanager
@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from orb.dashboard_alpaca import connection_status, observe_paper, fetch_run, local_bundles
 from orb.acquisition import AcquisitionError
 from orb.paper_snapshot import PaperSnapshotError
+from orb.paper_trading import PaperEngine, PaperError
 from threading import Lock
 from orb.profile_runs import apply_preset
 
@@ -26,7 +27,7 @@ from orb.research_settings import settings_contract
 from orb.research_store import ResearchStore, ResearchConflict, ResearchIntegrityError
 
 
-def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None, data_dir=None, comparison_example=False):
+def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, research_db=None, data_dir=None, comparison_example=False, paper_db=None):
     """Local inspection service with an optional persistent research archive.
 
     Host validation prevents browser DNS rebinding. Cross-origin requests and
@@ -36,6 +37,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
     store = PresetStore(preset_db if preset_db is not None else ':memory:')
     research = ResearchStore(research_db if research_db is not None else ':memory:',
                              max_runs=100 if research_db is not None else 12)
+    paper_engine = PaperEngine(paper_db) if paper_db is not None else None
     @asynccontextmanager
     async def lifespan(app):
         try:
@@ -45,6 +47,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         try:
             yield
         finally:
+            if paper_engine: await run_in_threadpool(paper_engine.close)
             store.close()
             research.close()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -117,6 +120,30 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if isinstance(exc, KeyError):
             raise HTTPException(404, 'preset version not found') from None
         raise HTTPException(422, 'invalid preset request or unsupported settings') from None
+
+    @app.get('/api/paper/status')
+    async def paper_status():
+        if not paper_engine: return {'available': False, 'enabled': False, 'message': 'Paper execution storage not configured.'}
+        return {'available': True, **await run_in_threadpool(paper_engine.status)}
+
+    @app.post('/api/paper/start')
+    async def start_paper(request: Request):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        p = await read_json(request, 4096)
+        try:
+            if not isinstance(p, dict) or set(p) != {'preset_id', 'version', 'feed'} or type(p['version']) is not int:
+                raise ValueError('exact saved preset required')
+            record = store.get(p['preset_id'], p['version'])
+            return await run_in_threadpool(paper_engine.start, record, p['feed'])
+        except (ValueError, KeyError, TypeError) as exc:
+            if isinstance(exc, (PaperError, AcquisitionError)): raise HTTPException(409, str(exc)) from None
+            raise HTTPException(422, 'Invalid paper preset request.') from None
+
+    @app.post('/api/paper/stop')
+    async def stop_paper(request: Request):
+        await empty_command(request)
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        return await run_in_threadpool(paper_engine.stop)
 
     @app.get('/api/alpaca/status')
     async def alpaca_status():
@@ -343,6 +370,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765, choices=range(1024, 65536), metavar='PORT')
+    parser.add_argument('--paper-db', type=Path, default=Path('results/dashboard-paper.sqlite'))
     parser.add_argument('--examples', action='store_true', help='load three explicitly synthetic examples')
     parser.add_argument('--web-dir', type=Path, default=Path('web/build'))
     parser.add_argument('--preset-db', type=Path, default=Path('results/dashboard-presets.sqlite'))
@@ -353,7 +381,7 @@ def main():
     if not (args.web_dir / 'index.html').is_file():
         parser.error('frontend missing: run npm ci && npm run build in web/ first')
     import uvicorn
-    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db, data_dir=args.data_dir, comparison_example=args.comparison_example),
+    uvicorn.run(create_app(port=args.port, examples=args.examples, web_dir=args.web_dir, preset_db=args.preset_db, research_db=args.research_db, data_dir=args.data_dir, comparison_example=args.comparison_example, paper_db=args.paper_db),
                 host='127.0.0.1', port=args.port, workers=1, access_log=False)
 
 
