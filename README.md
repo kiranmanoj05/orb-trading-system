@@ -10,7 +10,7 @@ An offline CSV replay records candidates and per-session outcomes chronologicall
 A fixed-share execution simulator records next-minute fills, exits and net P&L.
 A pure cost-aware sizing calculator and sequential shared account ledger are
 connected through chronological shared-account portfolio replay.
-Broker integration and paper trading are still planned.
+A bounded SPY-only local paper worker is now available; see [paper execution](docs/paper-trading.md).
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled
@@ -21,7 +21,7 @@ recovery gate can clear.
 A bounded Alpaca paper adapter now performs only fixed account, position and
 open-order GETs, requires two equal normalised passes and feeds that gate while
 leaving execution disabled.
-This application currently submits no orders.
+The dashboard can explicitly start a separate paper-only worker. It never selects a live broker endpoint; the offline coordinator above remains independent.
 
 ## Run locally
 
@@ -56,7 +56,7 @@ npm --prefix web run build
 python -m orb.dashboard_api
 ```
 
-Open **http://127.0.0.1:8765**. Complete Alpaca bundles in immediate child folders of `data/` are discovered and evaluated automatically. Add `--examples` only to inspect clearly labelled invented test data.
+Open **http://127.0.0.1:8765**. Complete Alpaca bundles in immediate child folders of `data/` are discovered and evaluated automatically. Saved synthetic examples remain available to API tests but are hidden from the normal workspace.
 Use **Import run** for canonical CSV, `capture.json`, or all three original
 bundle files (`capture.json`, `bars.csv`, `manifest.json`). Pair a saved v4/v5
 evaluation JSON to retain its settings, declared scope and original identity.
@@ -88,6 +88,14 @@ Settings, and on-demand Trades/Data/Account/Research details. The moving droplet
 logo and original-resolution video wallpaper are bundled locally. Uploaded media
 stays at original quality in this browser's IndexedDB; it does not sync devices.
 
+**Paper account is the default view.** In **Settings → Paper trading**, choose
+**Paper Balanced**, select IEX (or entitled real-time SIP), and click **Start
+paper trading**. Keep the server and Mac awake. This uses fresh SPY signals,
+one attempt/session, broker brackets and restart-safe intents. **Stop new
+entries** continues management; server shutdown does not. Read the
+[operating limits and presets](docs/paper-trading.md) before your first session.
+No actual paper account has been verified by the development tests.
+
 Open **Data & Alpaca**:
 
 - **Fetch & simulate** acquires SPY/QQQ historical SIP or IEX candles (at most seven
@@ -98,7 +106,7 @@ Open **Data & Alpaca**:
   the original evaluation JSON instead of assuming defaults.
 - **Refresh paper account** observes paper equity, cash, positions and latest
   500 orders, including cumulative fills. Paper mode refreshes every 30 seconds
-  while the visible page is active. This app does not submit any orders.
+  while the visible page is active. Start the separate bot through **Settings → Paper trading**.
 
 Credentials must be available as `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` in the
 terminal environment **before** starting the server. The dashboard never accepts,

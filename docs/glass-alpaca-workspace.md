@@ -1,5 +1,11 @@
 # Glass workspace and Alpaca integration
 
+> Update: [Paper execution v1](paper-trading.md) supersedes the original
+> observation-only boundary described below. Paper view now has its own current
+> session chart, no backtest overlays, and hidden synthetic examples. Submission
+> requires explicitly starting the paper worker in Settings.
+
+
 The former local dashboard had no provider-facing route and did not discover the
 user's existing CLI bundles. Starting with `--examples` therefore displayed test
 fixtures rather than the downloaded SIP run. This change integrates the approved

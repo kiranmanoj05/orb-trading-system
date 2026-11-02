@@ -20,12 +20,14 @@ export default function CandleChart({
   session,
   selected,
   paperOrders = [],
+  mode = "simulation",
 }: {
   run: Row;
   symbol: string;
   session: string;
   selected?: Row;
   paperOrders?: Row[];
+  mode?: "simulation" | "paper";
 }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     dialog = useRef<HTMLDialogElement>(null),
@@ -39,16 +41,26 @@ export default function CandleChart({
   const candles = run.candles.filter(
       (c: Row) => c.symbol === symbol && date(c.start) === session,
     ),
-    opening = run.opening_ranges.find(
-      (r: Row) => r.symbol === symbol && r.session === session,
-    );
-  const decisions = run.decisions.filter(
-    (d: Row) => d.symbol === symbol && date(d.signal.observed_at) === session,
-  );
-  const trade =
-    selected?.symbol === symbol && date(selected.signal.observed_at) === session
+    opening =
+      mode === "paper"
+        ? undefined
+        : run.opening_ranges.find(
+            (r: Row) => r.symbol === symbol && r.session === session,
+          );
+  const decisions =
+    mode === "paper"
+      ? []
+      : run.decisions.filter(
+          (d: Row) =>
+            d.symbol === symbol && date(d.signal.observed_at) === session,
+        );
+  const candidateTrade =
+    mode === "simulation" &&
+    selected?.symbol === symbol &&
+    date(selected.signal.observed_at) === session
       ? selected.trade
       : decisions[0]?.trade;
+  const trade = candidateTrade?.entry_at ? candidateTrade : undefined;
   const first = candles.length
       ? Date.parse(opening?.start || candles[0].start)
       : 0,
@@ -59,7 +71,7 @@ export default function CandleChart({
   useEffect(() => {
     setViewport({ offset: 0, minutes: 125 });
     setHover(null);
-  }, [run.evaluation_id, symbol, session]);
+  }, [run.evaluation_id, symbol, session, mode]);
   useEffect(() => {
     if (expanded) dialog.current?.showModal();
   }, [expanded]);
@@ -388,6 +400,10 @@ export default function CandleChart({
           {run.import_context?.synthetic
             ? "Invented test prices"
             : "Source candles"}{" "}
+          ·{" "}
+          {mode === "paper"
+            ? "Alpaca paper session · broker fill markers only"
+            : "Historical backtest · simulated trades"}{" "}
           · 1 minute
         </span>
         <span>New York · USD</span>

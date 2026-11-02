@@ -1,3 +1,4 @@
+import { researchFixtures, simulationView } from "./research-view.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -18,6 +19,8 @@ const server = spawn(
     "8878",
     "--web-dir",
     root + "/web/build",
+    "--paper-db",
+    temp + "/paper.sqlite",
     "--preset-db",
     temp + "/presets.sqlite",
     "--research-db",
@@ -64,7 +67,9 @@ try {
     }),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await researchFixtures(page);
   await page.goto(base);
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   const list = await (await fetch(base + "/api/runs")).json(),
     sourceId = list[0].id;
@@ -100,7 +105,7 @@ try {
       .getByLabel("Saved preset", { exact: true })
       .locator("option")
       .count(),
-    2,
+    5,
   );
   await page
     .getByRole("button", { name: "Duplicate saved preset", exact: true })
@@ -182,6 +187,7 @@ try {
     "PASS apply creates a new evaluator-backed run with an immutable preset snapshot",
   );
   await page.reload();
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   await page
     .getByRole("navigation")
@@ -447,6 +453,7 @@ try {
   assert.equal(imported.status, 201);
   const capacitySource = (await imported.json()).id;
   await page.reload();
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   await page
     .getByLabel("Selected run", { exact: true })
@@ -575,7 +582,10 @@ try {
   console.log("PASS preset reflow, reduced motion and no browser errors");
 } finally {
   if (browser) await browser.close();
-  server.kill();
-  await new Promise((r) => server.once("exit", r));
+  if (server.exitCode === null) {
+    const ended = new Promise((r) => server.once("exit", r));
+    server.kill();
+    await ended;
+  }
   await rm(temp, { recursive: true, force: true });
 }

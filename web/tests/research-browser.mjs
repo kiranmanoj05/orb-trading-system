@@ -1,3 +1,4 @@
+import { researchFixtures, simulationView } from "./research-view.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -57,7 +58,9 @@ try {
     }),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await researchFixtures(page);
   await page.goto(base);
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   const listing = await json("/api/runs"),
     source = listing.find((r) => !r.complete).id;
@@ -109,6 +112,7 @@ try {
   await stop();
   await start();
   await page.reload();
+  await simulationView(page);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await page
@@ -157,6 +161,7 @@ try {
   await stop();
   await start(false, true);
   await page.reload();
+  await simulationView(page);
   await page
     .getByRole("navigation")
     .getByRole("button", { name: "Settings", exact: true })
@@ -194,6 +199,7 @@ try {
   await stop();
   await start();
   await page.reload();
+  await simulationView(page);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await page

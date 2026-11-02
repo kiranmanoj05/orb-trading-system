@@ -59,7 +59,7 @@ def test_secret_reflection_is_rejected():
         observe_paper(credentials=CREDS,transport=lambda *args:HTTPResponse(200,json.dumps({'secret':CREDS.secret}).encode()))
 
 def test_order_limit_is_explicit():
-    values=paper_responses();values[2]=values[2]*500;responses=iter(values)
+    values=paper_responses();values[2]=[dict(values[2][0],id='order-'+str(i)) for i in range(500)];responses=iter(values)
     value=observe_paper(credentials=CREDS,transport=lambda *args:HTTPResponse(200,json.dumps(next(responses)).encode()))
     assert value['history_may_be_truncated'] and len(value['orders'])==500
 
@@ -117,3 +117,14 @@ def test_fetch_route_publishes_engine_source(monkeypatch,tmp_path):
         assert r.status_code==201
         actual=c.get('/api/runs/'+r.json()['id']).json()
         assert actual['decisions']==run['decisions'] and actual['candles']==run['candles']
+
+
+def test_nested_bracket_exit_fills_are_visible_and_deduplicated():
+    values=paper_responses()
+    child=dict(values[2][0],id='target-fill',side='sell',status='filled',filled_qty='2')
+    values[2][0]['legs']=[child]
+    values[2].append(child)
+    responses=iter(values)
+    result=observe_paper(credentials=CREDS,transport=lambda *a:HTTPResponse(200,json.dumps(next(responses)).encode()))
+    assert len(result['orders'])==2 and result['orders'][1]['side']=='sell'
+    assert result['includes_bracket_legs']

@@ -3,6 +3,7 @@
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 from pathlib import Path
 import sqlite3
@@ -12,6 +13,11 @@ from uuid import uuid4
 from orb.ingestion import _object, _invalid_constant
 from orb.research_settings import ResearchSettings, settings_contract, SCHEMA
 
+PAPER_STARTERS = {
+    'paper-calm': ('Paper Calm', '0.0025', '0.5', '0.01'),
+    'paper-balanced': ('Paper Balanced', '0.005', '0.75', '0.015'),
+    'paper-active': ('Paper Active', '0.01', '1', '0.02'),
+}
 REFERENCE = 'orb-reference'
 MWF = 'orb-mwf'
 APP_ID = 0x4F524250
@@ -96,6 +102,15 @@ class PresetStore:
         return dict(id=MWF, version=1, name='ORB MWF', settings=s.to_dict(),
                     settings_sha256=s.fingerprint, readonly=True, created_at=None)
 
+    @staticmethod
+    def paper(preset_id):
+        name, risk, allocation, daily = PAPER_STARTERS[preset_id]
+        s = ResearchSettings(initial_cash=Decimal('100000'), risk_fraction=Decimal(risk),
+            max_position_fraction=Decimal(allocation), daily_loss_fraction=Decimal(daily),
+            max_session_entries=1, max_concurrent_positions=1, schema_version='orb-research-settings-v3')
+        return dict(id=preset_id, version=1, name=name, settings=s.to_dict(),
+                    settings_sha256=s.fingerprint, readonly=True, created_at=None)
+
     def _record(self, row):
         if row is None:
             raise KeyError('preset version not found')
@@ -109,6 +124,9 @@ class PresetStore:
     def get(self, preset_id, version=None):
         if version is not None and (type(version) is not int or version < 1):
             raise ValueError('preset version must be a positive integer')
+        if preset_id in PAPER_STARTERS:
+            if version not in (None, 1): raise KeyError("starter version not found")
+            return self.paper(preset_id)
         if preset_id in (REFERENCE, MWF):
             if version not in (None, 1):
                 raise KeyError('reference version not found')
@@ -125,9 +143,10 @@ class PresetStore:
     def list(self):
         with self.lock:
             ids = [r[0] for r in self.db.execute('SELECT DISTINCT preset_id FROM preset_versions ORDER BY preset_id')]
-            return [self.reference(), self.mwf(), *(self.get(p) for p in ids)]
+            return [self.reference(), self.mwf(), *(self.paper(p) for p in PAPER_STARTERS), *(self.get(p) for p in ids)]
 
     def history(self, preset_id):
+        if preset_id in PAPER_STARTERS: return [self.paper(preset_id)]
         if preset_id in (REFERENCE, MWF):
             return [self.reference() if preset_id == REFERENCE else self.mwf()]
         with self.lock:
@@ -139,7 +158,7 @@ class PresetStore:
     def save(self, name, settings, *, preset_id=None, expected_version=None):
         name = _name(name)
         s = ResearchSettings.from_dict(settings)
-        if preset_id in (REFERENCE, MWF):
+        if preset_id in (REFERENCE, MWF, *PAPER_STARTERS):
             raise PresetConflict('Built-in presets are fixed; duplicate to create a variant')
         if preset_id is None and expected_version is not None:
             raise ValueError('new preset must not specify an expected version')

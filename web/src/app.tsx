@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
+import PaperControls from "./PaperControls";
 import ResearchJobs from "./ResearchJobs";
 import Comparisons from "./Comparisons";
 import CandleChart from "./CandleChart";
@@ -341,6 +342,7 @@ function Modal({
 function App() {
   const pendingView = useRef<{ symbol: string; session: string } | null>(null);
   const [runs, setRuns] = useState<Listing[]>([]),
+    [paperState, setPaperState] = useState<Row | null>(null),
     [id, setId] = useState(""),
     [run, setRun] = useState<Run | null>(null),
     [tab, setTab] = useState("Workspace"),
@@ -356,7 +358,7 @@ function App() {
     [durable, setDurable] = useState(false),
     [status, setStatus] = useState<Row | null>(null),
     [paper, setPaper] = useState<Row | null>(null),
-    [mode, setMode] = useState("simulation"),
+    [mode, setMode] = useState("paper"),
     [feed, setFeed] = useState("sip"),
     [start, setStart] = useState(""),
     [end, setEnd] = useState(""),
@@ -369,21 +371,39 @@ function App() {
       api("/api/alpaca/status"),
       api("/api/local-bundles"),
     ]);
-    setRuns(rows);
+    const visibleRows = rows.filter((r: Listing) => !r.synthetic);
+    setRuns(visibleRows);
     setDurable(storage.durable);
     setStatus(connection);
     setLocal(bundles.imports);
     setId(
       (old) =>
-        preferred ||
-        old ||
+        (visibleRows.some((r: Listing) => r.id === preferred)
+          ? preferred
+          : "") ||
+        (visibleRows.some((r: Listing) => r.id === old) ? old : "") ||
         [...rows].reverse().find((r: Listing) => !r.synthetic && r.complete)
           ?.id ||
         [...rows].reverse().find((r: Listing) => !r.synthetic)?.id ||
-        rows[0]?.id ||
+        visibleRows[0]?.id ||
         "",
     );
   }
+  useEffect(() => {
+    let live = true;
+    const poll = () =>
+      api("/api/paper/status")
+        .then((v) => {
+          if (live) setPaperState(v);
+        })
+        .catch(() => {});
+    poll();
+    const timer = setInterval(poll, 15000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
   }, []);
@@ -454,6 +474,20 @@ function App() {
       setPanel("");
     });
   }
+  useEffect(() => {
+    if (mode !== "paper" || !status?.configured) return;
+    let live = true;
+    api("/api/alpaca/observe", { method: "POST" })
+      .then((v) => {
+        if (live) setPaper(v);
+      })
+      .catch((e) => {
+        if (live) setError(e.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [mode, status?.configured]);
   useEffect(() => {
     if (mode !== "paper" || !paper) return;
     let active = true;
@@ -560,6 +594,13 @@ function App() {
         )}
         {tab === "Settings" ? (
           <main className="settings-view">
+            <PaperControls
+              status={paperState}
+              changed={(s) => {
+                setPaperState({ ...s, available: true });
+                setMode("paper");
+              }}
+            />
             <Presets
               runId={id || undefined}
               applied={run?.applied_settings.preset}
@@ -600,7 +641,9 @@ function App() {
                       ? "Invented test prices"
                       : mode === "simulation"
                         ? "Historical evaluation"
-                        : "Read-only account"}
+                        : paperState?.enabled
+                          ? "Paper bot running"
+                          : "Broker account"}
                   </span>
                 </p>
               </div>
@@ -608,7 +651,7 @@ function App() {
                 <button className="status" onClick={() => setPanel("Data")}>
                   <i />
                   {mode === "paper"
-                    ? "Paper observation"
+                    ? "Paper account"
                     : "Historical simulation"}{" "}
                   ⌄
                 </button>
@@ -620,7 +663,40 @@ function App() {
                 </button>
               </div>
             </section>
-            {loading ? (
+            {mode === "paper" ? (
+              <>
+                <p className="caption" data-testid="paper-context">
+                  Alpaca paper account · SPY ·{" "}
+                  {paperState?.market?.session || "No current session loaded"} ·{" "}
+                  {paperState?.market
+                    ? `${paperState.market.feed.toUpperCase()} minute candles`
+                    : "No historical simulation shown"}
+                </p>
+                {paperState?.market?.candles?.length ? (
+                  <CandleChart
+                    run={paperState.market}
+                    symbol="SPY"
+                    session={paperState.market.session}
+                    paperOrders={paperFills}
+                    mode="paper"
+                  />
+                ) : (
+                  <section className="chart-card glass empty-workspace">
+                    <h2>No paper-session candles yet</h2>
+                    <p>
+                      {paperState?.message ||
+                        "Start the paper worker in Settings to load the current session."}
+                    </p>
+                    <button onClick={() => setTab("Settings")}>
+                      Paper trading settings ↗
+                    </button>
+                  </section>
+                )}
+                {paperState?.market?.candles?.length > 0 && (
+                  <p className="caption">{paperState?.message}</p>
+                )}
+              </>
+            ) : loading ? (
               <p role="status" className="panel">
                 Loading run…
               </p>
@@ -691,11 +767,7 @@ function App() {
                   symbol={symbol}
                   session={session}
                   selected={selected}
-                  paperOrders={
-                    mode === "paper" && run.import_context.synthetic !== true
-                      ? paperFills
-                      : []
-                  }
+                  mode="simulation"
                 />
               </>
             ) : (
@@ -725,7 +797,10 @@ function App() {
                 onClick={() => setTab("Settings")}
               >
                 <span className="mini-dot" />
-                {run?.applied_settings.preset?.name || "ORB Reference"} ⌄
+                {(mode === "paper"
+                  ? paperState?.preset?.name
+                  : run?.applied_settings.preset?.name) || "Choose preset"}{" "}
+                ⌄
               </button>
               <button
                 className="glass utility-button"
@@ -738,8 +813,11 @@ function App() {
         )}
         <footer className="site-footer">
           <span>
-            {mode === "paper" ? "Paper observation" : "Historical simulation"} ·
-            order submission disabled
+            {mode === "paper"
+              ? paperState?.enabled
+                ? "Paper bot running · paper orders enabled"
+                : "Paper account · new entries stopped"
+              : "Historical simulation · no broker orders"}
           </span>
           <button onClick={() => setPanel("Evidence")}>Details</button>
         </footer>
@@ -798,8 +876,8 @@ function App() {
               </button>
               <p className="caption">
                 Read-only balances, positions and latest 500 orders. Refreshes
-                every 30 seconds while Paper account is visible. No orders are
-                submitted.
+                every 30 seconds while Paper account is visible. To run the bot,
+                use Settings → Paper trading.
               </p>
               <h3 className="drawer-content-title">Fetch & simulate</h3>
               <p className="drawer-note">
@@ -873,9 +951,8 @@ function App() {
             (mode === "paper" ? (
               <>
                 <p className="drawer-note">
-                  Broker orders · attribution to ORB is unknown. Cumulative
-                  average fill markers appear over a matching imported
-                  symbol/session.
+                  Broker orders and confirmed cumulative fills. Paper charts
+                  never show simulated entries.
                 </p>
                 {paper?.history_may_be_truncated && (
                   <p className="warning">
@@ -900,40 +977,42 @@ function App() {
                       {o.filled_quantity} filled @ {money(o.average_fill_price)}
                     </small>
                     <small>{o.filled_at || o.submitted_at}</small>
-                    {["SPY", "QQQ"].includes(o.symbol) && o.filled_at && (
-                      <button
-                        onClick={() => {
-                          const r = runs.find(
-                            (v) =>
-                              v.synthetic !== true &&
-                              v.start <= day(o.filled_at) &&
-                              v.end >= day(o.filled_at),
-                          );
-                          if (r) {
-                            if (r.id !== id)
+                    {mode !== "paper" &&
+                      ["SPY", "QQQ"].includes(o.symbol) &&
+                      o.filled_at && (
+                        <button
+                          onClick={() => {
+                            const r = runs.find(
+                              (v) =>
+                                v.synthetic !== true &&
+                                v.start <= day(o.filled_at) &&
+                                v.end >= day(o.filled_at),
+                            );
+                            if (r) {
+                              if (r.id !== id)
+                                pendingView.current = {
+                                  symbol: o.symbol,
+                                  session: day(o.filled_at),
+                                };
+                              setId(r.id);
+                              setSymbol(o.symbol);
+                              setSession(day(o.filled_at));
+                              setChosen("");
+                              setPanel("");
+                            } else {
                               pendingView.current = {
                                 symbol: o.symbol,
                                 session: day(o.filled_at),
                               };
-                            setId(r.id);
-                            setSymbol(o.symbol);
-                            setSession(day(o.filled_at));
-                            setChosen("");
-                            setPanel("");
-                          } else {
-                            pendingView.current = {
-                              symbol: o.symbol,
-                              session: day(o.filled_at),
-                            };
-                            setStart(day(o.filled_at));
-                            setEnd(day(o.filled_at));
-                            setPanel("Data");
-                          }
-                        }}
-                      >
-                        View / fetch matching candles ↗
-                      </button>
-                    )}
+                              setStart(day(o.filled_at));
+                              setEnd(day(o.filled_at));
+                              setPanel("Data");
+                            }
+                          }}
+                        >
+                          View / fetch matching candles ↗
+                        </button>
+                      )}
                   </article>
                 ))}
               </>
@@ -1040,7 +1119,14 @@ function App() {
                 )}
               </>
             ))}
-          {panel === "Evidence" && (
+          {panel === "Evidence" && mode === "paper" && (
+            <p className="drawer-note">
+              {paperState?.message} Broker observation:{" "}
+              {paper?.observed_at || "not refreshed"}. Historical research is
+              available in Simulation mode.
+            </p>
+          )}
+          {panel === "Evidence" && mode !== "paper" && (
             <>
               <button onClick={() => setPanel("Research")}>
                 Research jobs ↗

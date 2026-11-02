@@ -1,3 +1,4 @@
+import { researchFixtures, simulationView } from "./research-view.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -22,6 +23,8 @@ async function start(examples = false) {
       "8882",
       "--web-dir",
       root + "/web/build",
+      "--paper-db",
+      temp + "/paper.sqlite",
       "--preset-db",
       temp + "/p.sqlite",
       "--research-db",
@@ -99,7 +102,9 @@ try {
     }),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await researchFixtures(page);
   await page.goto(base);
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   await page.getByLabel("Selected run", { exact: true }).selectOption(source);
   await page.getByRole("button", { name: "Details", exact: true }).click();
@@ -175,6 +180,7 @@ try {
   await stop();
   await start();
   await page.reload();
+  await simulationView(page);
   await page.getByLabel("Selected run", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Details", exact: true }).click();
   await page

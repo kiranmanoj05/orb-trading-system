@@ -20,7 +20,7 @@ def settings(**changes):return {**ResearchSettings(schema_version=SCHEMA).to_dic
 
 def test_api_contract_and_builtins_keep_reference_and_mwf_distinct(tmp_path):
     with TestClient(create_app(examples=True,preset_db=tmp_path/'p.sqlite'),base_url='http://127.0.0.1:8765') as c:
-        data=c.get('/api/presets').json();reference,mwf=data['presets']
+        data=c.get('/api/presets').json();reference,mwf=data['presets'][:2]
         assert reference['settings']['schema_version']=='orb-research-settings-v1'
         assert mwf['settings']['weekdays']==[0,2,4]
         assert mwf['settings']['target_r']=='2'
@@ -51,7 +51,7 @@ def test_invalid_calendar_and_target_inputs_never_become_defaults_or_500(tmp_pat
     with TestClient(create_app(preset_db=tmp_path/'p.sqlite'),base_url='http://127.0.0.1:8765') as c:
         response=c.post('/api/presets',json=dict(name='Invalid',settings=settings(**changes)))
         assert response.status_code==422,response.text
-        assert len(c.get('/api/presets').json()['presets'])==2
+        assert len(c.get('/api/presets').json()['presets'])==5
 
 
 def test_cli_v2_target_and_weekday_settings_drive_actual_result(tmp_path):
