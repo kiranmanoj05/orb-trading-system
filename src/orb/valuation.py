@@ -91,3 +91,5 @@ def market_valuation(bars, portfolio, coverage):
                             'Marks are observed closes, not liquidation quotes; exit fees are not estimated.',
                             'Admission uses separate fresh marked snapshots; this series is post-event reporting.',
                             'Incomplete coverage or outcomes suppress aggregate return and drawdown.']}
+    
+# to do
