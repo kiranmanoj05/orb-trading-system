@@ -344,7 +344,7 @@ function App() {
   const [runs, setRuns] = useState<Listing[]>([]),
     [paperState, setPaperState] = useState<Row | null>(null),
     [id, setId] = useState(""),
-    [run, setRun] = useState<Run | null>(null),
+    [loadedRun, setRun] = useState<Run | null>(null),
     [tab, setTab] = useState("Workspace"),
     [panel, setPanel] = useState(""),
     [appearance, setAppearance] = useState(false),
@@ -364,6 +364,9 @@ function App() {
     [end, setEnd] = useState(""),
     [local, setLocal] = useState<Row[]>([]),
     [comparisonId, setComparisonId] = useState("");
+  // A new selection must not borrow the previous run's chart or settings
+  // while its asynchronous request is still pending.
+  const run = loadedRun?.evaluation_id === id ? loadedRun : null;
   async function refresh(preferred?: string) {
     const [rows, storage, connection, bundles] = await Promise.all([
       api("/api/runs"),
@@ -819,7 +822,12 @@ function App() {
                 : "Paper account · new entries stopped"
               : "Historical simulation · no broker orders"}
           </span>
-          <button onClick={() => setPanel("Evidence")}>Details</button>
+          <button
+            disabled={mode === "simulation" && !!id && !run}
+            onClick={() => setPanel("Evidence")}
+          >
+            Details
+          </button>
         </footer>
       </div>
       {importing && (
@@ -1162,6 +1170,20 @@ function App() {
                   <Pair
                     name="Costs / side"
                     value={`${config.slippage_bps} bps + ${config.fee_per_share} USD/share`}
+                  />
+                  <Pair
+                    name="Opening range"
+                    value={`${config.effective_rules?.range_minutes ?? 15} minutes from 09:30 New York`}
+                  />
+                  <Pair
+                    name="Entry window"
+                    value={`${config.effective_rules?.entry_delay_minutes ?? 0} minute delay after range; completed close before ${config.effective_rules?.entry_cutoff_local ?? "11:00"} New York`}
+                  />
+                  <Pair
+                    name="Initial stop"
+                    value={(
+                      config.effective_rules?.stop_policy ?? "range_midpoint"
+                    ).replaceAll("_", " ")}
                   />
                   <p className="drawer-note">
                     Idealised full fills. Assumed costs are not calibrated

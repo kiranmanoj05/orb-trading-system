@@ -32,18 +32,19 @@ class BreakoutDetector:
                  entry_policy: EntryPolicy | None = None) -> None:
         local_start = opening_range.start.astimezone(NEW_YORK)
         local_end = opening_range.end.astimezone(NEW_YORK)
+        self.entry_policy = resolve_policy(entry_policy)
         if (local_start.time() != time(9, 30)
                 or local_end.date() != local_start.date()
-                or local_end.time() != time(9, 45)):
-            raise ValueError("detector requires the 09:30–09:45 New York range")
-        self.entry_policy = resolve_policy(entry_policy)
+                or local_end != local_start + timedelta(minutes=self.entry_policy.range_minutes)):
+            raise ValueError("09:30 opening range does not match the validated policy")
         self.version = self.entry_policy.strategy_version
         self.opening_range = opening_range
-        self.cutoff = datetime.combine(local_start.date(), time(11), NEW_YORK)
+        self.cutoff = datetime.combine(local_start.date(), time.fromisoformat(self.entry_policy.entry_cutoff_local), NEW_YORK)
+        self.entry_start = local_end + timedelta(minutes=self.entry_policy.entry_delay_minutes)
         if session is not None:
-            if session.opens_at != opening_range.start or session.range_end != opening_range.end:
+            if session.opens_at != opening_range.start or self.entry_policy.range_end(session) != opening_range.end:
                 raise ValueError("opening range does not match exchange session")
-            self.cutoff = session.entry_cutoff
+            self.cutoff = self.entry_policy.entry_cutoff(session)
         eligible = self.entry_policy.allows(local_start.date())
         self.state = SignalState.READY if eligible else SignalState.INACTIVE
         self.pause_reason: str | None = None if eligible else "weekday_not_eligible"
@@ -90,9 +91,11 @@ class BreakoutDetector:
             self._pause("missing_or_out_of_order_bar")
             return None
         self._last_bar = bar
+        if bar.start < self.entry_start:
+            return None
         if bar.close <= self.opening_range.high:
             return None
-        stop = self.opening_range.midpoint
+        stop = self.entry_policy.stop(self.opening_range)
         # Stable identity for the single permitted session attempt, not a fill ID.
         identity = f"{self.version}|{bar.symbol}|{self.cutoff.date()}|1"
         signal = BreakoutSignal(

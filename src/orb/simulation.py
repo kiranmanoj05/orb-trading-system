@@ -102,7 +102,7 @@ def simulate(bars: Iterable[Bar], config: ExecutionConfig | None = None, *,
         assert schedule is not None
         future = [b for b in grouped[(signal.symbol, day)] if b.start >= signal.observed_at]
         fields = dict(signal_id=signal.signal_id, symbol=signal.symbol, quantity=config.quantity)
-        if signal.observed_at >= schedule.entry_cutoff:
+        if signal.observed_at >= policy.entry_cutoff(schedule):
             trades.append(SimulatedTrade(**fields, status="unfilled", reason="entry_cutoff"))
             continue
         if not future or future[0].start != signal.observed_at:

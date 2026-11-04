@@ -4,11 +4,15 @@ type Settings = Record<string, string | number[]>;
 function editable(s: Settings): Settings {
   return {
     ...s,
-    schema_version: "orb-research-settings-v3",
+    schema_version: "orb-research-settings-v4",
     max_session_entries: s.max_session_entries || "2",
     max_concurrent_positions: s.max_concurrent_positions || "2",
     target_r: s.target_r || "2",
     weekdays: Array.isArray(s.weekdays) ? [...s.weekdays] : [0, 1, 2, 3, 4],
+    range_minutes: s.range_minutes || "15",
+    entry_delay_minutes: s.entry_delay_minutes || "0",
+    entry_cutoff_local: s.entry_cutoff_local || "11:00",
+    stop_policy: s.stop_policy || "range_midpoint",
   };
 }
 type Preset = {
@@ -31,6 +35,7 @@ type Contract = {
     integer?: boolean;
   }[];
   weekdays: { value: number; label: string }[];
+  strategy_options: { key: string; label: string; choices: string[] }[];
   unsupported: string[];
   notice: string;
 };
@@ -257,6 +262,33 @@ export default function Presets({
               </label>
             ))}
           </fieldset>
+          <fieldset disabled={saved.readonly || busy} className="preset-fields">
+            <legend>Range, entry window & initial stop · research</legend>
+            {contract.strategy_options.map((f) => (
+              <label key={f.key}>
+                {f.label}
+                <select
+                  aria-label={f.label}
+                  value={String(draft[f.key] || "")}
+                  onChange={(e) =>
+                    setDraft({ ...draft, [f.key]: e.target.value })
+                  }
+                >
+                  {f.choices.map((v) => (
+                    <option key={v} value={v}>
+                      {v.replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <p className="caption">
+              Range starts at 09:30 New York. Delay gates candidate candle
+              starts after the range; completed closes must arrive strictly
+              before the cutoff. Missing intervening minutes still block a
+              signal. These variants are not supported by the paper worker.
+            </p>
+          </fieldset>
           <fieldset
             disabled={saved.readonly || busy}
             className="weekday-fields"
@@ -392,8 +424,8 @@ export default function Presets({
             </summary>
             <code>{saved.settings_sha256}</code>
             <p>
-              Unsupported here: {contract.unsupported.join("; ")}. These have no
-              editable controls and are not silently ignored.
+              Outside this research contract: {contract.unsupported.join("; ")}.
+              Unsupported execution settings are rejected, not silently ignored.
             </p>
             <p>
               Presets persist across server restarts when a database is

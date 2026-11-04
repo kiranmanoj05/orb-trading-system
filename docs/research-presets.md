@@ -2,8 +2,8 @@
 
 The local platform now has real selection, edit/save/duplicate/reset, historical
 version inspection and application to a separate historical evaluation. This now covers **supported risk/cost inputs plus New York entry weekdays and
-planned target R and session/concurrency caps**. Other timing/stop rules remain
-unsupported. See trading-profile-variants.md for exact semantics and compatibility.
+planned target R, session/concurrency caps, range duration, entry delay/cutoff
+and midpoint/range-low stops**. Timing/stop variants are research-only. See trading-profile-variants.md for exact semantics and compatibility.
 
 ## Use in the dashboard
 
@@ -23,12 +23,12 @@ A transient preset-load error has a working reload path.
 
 ## Shared contract and limits
 
-`ResearchSettings` v3 is authoritative for the new preset CLI, API/editor and saved
+`ResearchSettings` v4 is authoritative for the new preset CLI, API/editor and saved
 report imports. Settings JSON has exactly these fields (decimal/integer values are strings; weekdays is an integer array):
 
 | Field | Unit / supported range |
 | --- | --- |
-| schema_version | `orb-research-settings-v3` (v1/v2 retained for old records) |
+| schema_version | `orb-research-settings-v4` (v1/v2/v3 retained unchanged) |
 | initial_cash | USD, positive, at most 1e12 |
 | risk_fraction | Equity fraction, greater than 0 and at most 1 |
 | max_position_fraction | Allocation fraction, greater than 0 and at most 1 |
@@ -41,6 +41,10 @@ report imports. Settings JSON has exactly these fields (decimal/integer values a
 | max_session_entries | Integer string `1` or `2`; filled-entry cap, pending holds a slot |
 | max_concurrent_positions | Integer string `1` or `2`; pending/open/unresolved slots |
 | weekdays | Nonempty ordered unique JSON integers 0–4 (Mon–Fri), NY session dates |
+| range_minutes | Integer string `5`, `15` or `30`, anchored at 09:30 New York |
+| entry_delay_minutes | Integer string `0`, `5`, `15` or `30` after range completion |
+| entry_cutoff_local | `10:00`, `10:30`, `11:00`, `11:30` or `12:00`, New York |
+| stop_policy | `range_midpoint` or `range_low`, fixed at signal time |
 
 `0.005` means **0.5%**, not 0.005%. Exact decimal strings avoid silently using
 binary floating-point values. JSON numbers, booleans, missing/unknown fields,
@@ -58,9 +62,9 @@ Alpaca execution costs.
 The reference remains SPY/QQQ long-only, all eligible NY exchange weekdays,
 [09:30,09:45) range, completed close strictly above frozen high before 11:00,
 midpoint stop, planned 2R and one candidate/symbol/session. The independently
-defined ORB MWF changes only weekdays to Monday/Wednesday/Friday. Custom v3
-versions can change weekdays, target R and session/concurrency caps. Range/entry
-timing and alternative stops remain explicitly unavailable. Customisation is not evidence of economic improvement.
+defined ORB MWF changes only weekdays to Monday/Wednesday/Friday. Custom v4
+versions additionally support bounded timing and initial-stop variants. Old v1/v2/v3
+records retain their fields/fingerprints; editing upgrades only the new saved version. Customisation is not evidence of economic improvement.
 
 ## Persistence and identity
 
@@ -159,4 +163,25 @@ and exits release concurrency only. A cap never creates a trade or re-arms a
 consumed candidate. Existing timing, costs, data/loss gates and tie ordering
 remain authoritative. The durable offline coordinator serialises and reconstructs
 these counters with cash/risk/intents; historical dashboard runs now use the optional separate research archive.
-No paper execution or external partial-fill resource release is enabled.
+The separate bounded SPY paper worker supports the reference timing/stop window
+only; it rejects timing/stop variants before acquiring credentials. External
+partial-fill ledger integration remains unfinished.
+
+## Timing and initial-stop semantics (v4)
+
+See [timing and stop variants](timing-stop-variants.md). The first eligible
+candidate candle starts at range end plus the delay; its close must complete
+strictly before the NY cutoff, capped by the exchange flatten deadline.
+Empty windows are invalid. All intervening minute bars remain required even
+during a delay. A pre-window close does not consume the single candidate;
+a later eligible close still strictly above the frozen high may qualify.
+There is no additional cross-back-through-the-high requirement. Stop and target
+management continues after cutoff. Range low is an initial fixed stop, not
+a trailing stop. Wider stops can reduce sizing and alter outcomes.
+
+The nested entry-policy v2 records every timing/stop choice. Current v6/v7
+evaluation envelopes retain their structure and use this versioned nested
+policy; source/model/settings identities distinguish results. The historical
+schedule-only comparison rejects timing or stop differences rather than
+confounding weekday attribution. This release adds capability, not a parameter
+search or an economic recommendation.

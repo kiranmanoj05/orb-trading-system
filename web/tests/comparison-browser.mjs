@@ -165,10 +165,32 @@ try {
   console.log(
     "PASS UI queues frozen schedule/cost protocol, real worker produces eight honest cells and source stays immutable",
   );
+  let releaseTrial;
+  const trialGate = new Promise((resolve) => {
+    releaseTrial = resolve;
+  });
+  await page.route(
+    base + "/api/runs/" + result.rows[5].run_id,
+    async (route) => {
+      await trialGate;
+      await route.continue();
+    },
+  );
   await page
     .getByRole("button", { name: "Inspect trial 6", exact: true })
     .click();
-  await page.getByLabel("Selected run", { exact: true }).waitFor();
+  await page.locator("dialog[open]").waitFor({ state: "hidden" });
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Details", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(await page.locator("canvas").count(), 0);
+  releaseTrial();
+  console.log(
+    "PASS delayed trial selection cannot show the previous run chart or settings",
+  );
   await page.getByRole("button", { name: "Details", exact: true }).click();
   assert.match(
     await page.locator("dialog[open]").textContent(),

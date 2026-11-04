@@ -117,15 +117,15 @@ def replay(bars: Iterable[Bar], *, entry_policy: EntryPolicy | None = None) -> R
             state.skip_reason = "weekday_not_eligible"
             continue  # Entry gate only: callers still receive every source bar.
         observed_at = stamp + timedelta(minutes=1)
-        range_end = schedule.range_end
+        range_end = policy.range_end(schedule)
         if local < range_end:
             state.range_bars.append(bar)
-        # Freeze at the moment the 09:44 bar completes, or skip when a later
+        # Freeze when the final required range minute completes, or skip when a later
         # observation reveals an incomplete range. Never inspect future bars.
         if state.detector is None and state.skip_reason is None and observed_at >= range_end:
             try:
                 opening_range = calculate_opening_range(
-                    state.range_bars, bar.symbol, day, observed_at)
+                    state.range_bars, bar.symbol, day, observed_at, range_minutes=policy.range_minutes)
             except ValueError as exc:
                 state.skip_reason = str(exc)
             else:
