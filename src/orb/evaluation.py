@@ -244,6 +244,11 @@ def render_report(result: dict) -> str:
                   'New York eligible weekdays: ' + ', '.join(days[d] for d in policy['weekdays']),
                   f"Planned price reward/risk: {policy['target_r']}R; not a net payoff guarantee.",
                   'Schedule gates new candidates only; all valuation/coverage/account observations remain.']
+        if policy.get('schema_version') == 'orb-entry-policy-v2':
+            lines += [f"Opening range: {policy['range_minutes']} minutes from 09:30 New York.",
+                      f"Candidate candle-start delay after range: {policy['entry_delay_minutes']} minutes; "
+                      f"completed close strictly before {policy['entry_cutoff_local']} New York (capped by flatten).",
+                      f"Initial stop policy: {policy['stop_policy']}; no trailing stop or loss guarantee."]
     caps = m["config"].get("entry_caps")
     if caps:
         lines += ["", "## Entry capacity", "",

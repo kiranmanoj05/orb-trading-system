@@ -26,7 +26,8 @@ accessible without exposing credentials in a browser.
    The complete source package and immutable result enter the research archive.
 4. Settings preserves validated selection/edit/save/duplicate/reset, history, apply
    and queue actions. Applying a saved version makes a new run; the source and old
-   results stay immutable. Unsupported timing/stop policies are still unsupported.
+   results stay immutable. Bounded research timing/stop settings are now supported; see timing-stop-variants.md.
+   Paper execution still requires the reference timing/stop window.
 5. Trades lists ALL engine candidates, not only winners or completed positions.
    Each row links to matching candles; details reveal reason, exact entry/stop/
    target/exit, quantity and fees. Candles are from the source; missing minutes

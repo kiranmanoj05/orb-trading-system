@@ -70,7 +70,10 @@ exact saved version to a **new** historical run. Presets persist in the local
 SQLite file `results/dashboard-presets.sqlite` (override with `--preset-db`).
 Existing runs keep their frozen settings. ORB MWF now provides an independent
 Monday/Wednesday/Friday entry schedule with otherwise identical baseline rules;
-custom presets support NY entry weekdays and planned target R. These are
+custom presets support NY entry weekdays and planned target R. V4 research presets
+also support 5/15/30-minute ranges, bounded entry delay/cutoff and midpoint/range-low
+stops; see [timing/stop semantics](docs/timing-stop-variants.md). These variants
+are rejected by the paper worker, which retains the reference window. These are
 research variants, not claims of safer or improved returns. Imports, snapshots
 and frozen preset jobs now persist in the local research archive; see
 [durable research and queue controls](docs/durable-research.md).

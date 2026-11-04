@@ -36,7 +36,9 @@ freezes that exact record; later preset edits do not change the running worker.
 ## Supported strategy and execution
 
 - SPY long only, eligible weekdays from the selected preset, **one attempt per
-  NY session and one position**. Other entry/concurrency caps are rejected.
+  NY session and one position**. Other entry/concurrency caps are rejected. V4 presets with reference timing/stop
+  rules are accepted; changed ranges, delay, cutoff or stop policy are explicitly
+  research-only and rejected before credential/client creation.
 - Opening range 09:30–09:45 New York; first completed consecutive-minute close
   above its high before 11:00 NY. Midpoint stop; configured target R.
 - Only a fresh first breakout is admitted. Starting after an earlier signal

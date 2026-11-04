@@ -1,0 +1,25 @@
+{
+  "schema_version": "orb-research-settings-v4",
+  "initial_cash": "10000",
+  "risk_fraction": "0.005",
+  "max_position_fraction": "0.25",
+  "max_gross_fraction": "1",
+  "max_total_risk_fraction": "0.01",
+  "daily_loss_fraction": "0.02",
+  "slippage_bps": "0",
+  "fee_per_share": "0",
+  "target_r": "2",
+  "weekdays": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "max_session_entries": "2",
+  "max_concurrent_positions": "2",
+  "range_minutes": "5",
+  "entry_delay_minutes": "0",
+  "entry_cutoff_local": "11:00",
+  "stop_policy": "range_low"
+}

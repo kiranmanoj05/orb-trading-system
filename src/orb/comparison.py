@@ -49,7 +49,7 @@ def validate_plan(value, original):
         settings=ResearchSettings.from_dict(p['settings']).current_values()
         schedules.append(tuple(settings.pop('weekdays')))
         if settings!={k:v for k,v in base.items() if k!='weekdays'}:
-            raise ValueError('schedule-only comparison requires identical risk, target, capital, caps and base costs')
+            raise ValueError('schedule-only comparison requires identical timing, stop, risk, target, capital, caps and base costs')
     if len(set(schedules))!=len(schedules):
         raise ValueError('comparison schedules must be distinct')
     if not isinstance(value['costs'],list) or not 1<=len(value['costs'])<=2:

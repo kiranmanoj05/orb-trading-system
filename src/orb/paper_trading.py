@@ -158,6 +158,9 @@ class PaperEngine:
     @staticmethod
     def validate(record, feed):
         s = ResearchSettings.from_dict(record['settings'])
+        if not s.policy.uses_reference_window:
+            raise PaperError('Timing and stop variants are research-only; paper v1 requires the 15-minute range, '
+                             'zero delay, 11:00 NY cutoff and midpoint stop.')
         if (feed not in ('iex', 'sip') or s.initial_cash > 100000 or s.risk_fraction > Decimal('.01')
                 or s.daily_loss_fraction > Decimal('.03') or s.max_session_entries != 1
                 or s.max_concurrent_positions != 1 or s.target_r > 3):

@@ -11,6 +11,7 @@ from orb.evaluation import evaluate, _decimal, _digest
 from orb.outcomes import outcome_class
 from orb.strategy import NEW_YORK, calculate_opening_range
 from orb.session import exchange_session
+from orb.entry_policy import resolve_policy
 
 
 def build_dashboard_run(bars, *args, **kwargs) -> dict:
@@ -23,6 +24,7 @@ def build_dashboard_run(bars, *args, **kwargs) -> dict:
     """
     data = list(bars)
     result = evaluate(data, *args, **kwargs)
+    policy = resolve_policy(kwargs.get('entry_policy'))
     canonical = sorted(data, key=lambda b: (b.start, b.symbol))
     candles = [dict(symbol=b.symbol, start=b.start.astimezone(timezone.utc).isoformat(),
                     available_at=(b.start + timedelta(minutes=1)).astimezone(timezone.utc).isoformat(),
@@ -33,10 +35,14 @@ def build_dashboard_run(bars, *args, **kwargs) -> dict:
         day = date.fromisoformat(coverage['session'])
         session = exchange_session(day)
         window = [b for b in canonical if b.symbol == coverage['symbol']
-                  and session.opens_at <= b.start < session.range_end]
-        if len(window) != 15:
+                  and session.opens_at <= b.start < policy.range_end(session)]
+        if len(window) != policy.range_minutes:
             continue  # Never display a fabricated range over missing minutes.
-        opening = calculate_opening_range(window, coverage['symbol'], day, session.range_end)
+        try:
+            opening = calculate_opening_range(window, coverage['symbol'], day, policy.range_end(session),
+                                              range_minutes=policy.range_minutes)
+        except ValueError:
+            continue  # Zero-width ranges are not drawable strategy evidence.
         ranges.append(dict(symbol=opening.symbol, session=str(day),
                            start=opening.start.astimezone(timezone.utc).isoformat(),
                            available_at=opening.end.astimezone(timezone.utc).isoformat(),
@@ -45,6 +51,10 @@ def build_dashboard_run(bars, *args, **kwargs) -> dict:
     applied = {**result['manifest']['config'],
                'strategy_version': result['manifest']['engine']['strategy_version'],
                'session_timezone': str(NEW_YORK),
+               'effective_rules': {'range_minutes': policy.range_minutes,
+                                   'entry_delay_minutes': policy.entry_delay_minutes,
+                                   'entry_cutoff_local': policy.entry_cutoff_local,
+                                   'stop_policy': policy.stop_policy, 'target_r': str(policy.target_r)},
                'reference_rules': {'range_minutes': 15, 'entry_cutoff_local': '11:00',
                                    'stop_policy': 'range_midpoint', 'target_r': '2',
                                    'candidate_cap_per_symbol_session': 1}}
