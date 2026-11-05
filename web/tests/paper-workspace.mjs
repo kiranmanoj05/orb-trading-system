@@ -1,7 +1,7 @@
 /** Paper/simulation isolation and explicit Start/Stop with injected broker data. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -69,7 +69,14 @@ try {
   let running = false,
     market = null,
     posts = [];
+  let evidence = {
+    attempts: [],
+    orders: [],
+    holds: [],
+    entries_blocked: false,
+  };
   const state = () => ({
+    evidence,
     available: true,
     enabled: running,
     preset: running ? { name: "Paper Balanced", version: 1 } : null,
@@ -226,6 +233,129 @@ try {
     .waitFor();
   assert.equal(running, false);
   console.log("PASS Start freezes preset identity and Stop blocks new entries");
+  const session = source.evidence.coverage[0].session;
+  const ownedOrders = [
+    orders[0],
+    {
+      ...orders[0],
+      id: "owned-exit",
+      side: "sell",
+      average_fill_price: "102",
+      filled_at: source.candles[34].start,
+    },
+  ];
+  evidence = {
+    attempts: [
+      {
+        session,
+        state: "closed_price_evidence",
+        preset_name: "Paper Balanced",
+        preset_version: 1,
+        entry_filled: "3",
+        exit_filled: "3",
+        gross_price_pnl_usd: "5.1",
+        net_pnl_usd: null,
+        observed_at: new Date().toISOString(),
+        orders: ownedOrders.map((o) => ({
+          ...o,
+          role: o.side === "buy" ? "entry" : "bracket_exit",
+        })),
+      },
+    ],
+    orders: ownedOrders,
+    holds: [],
+    entries_blocked: false,
+  };
+  await page.reload();
+  await page.getByRole("button", { name: /^Trades/ }).click();
+  const journal = page.getByRole("region", {
+    name: "Saved ORB paper evidence",
+  });
+  await journal
+    .getByText("Closed gross estimate: $5.10", { exact: true })
+    .waitFor();
+  assert.match(await journal.textContent(), /Net P&L: Unavailable/);
+  assert.match(await journal.textContent(), /Paper Balanced v1/);
+  console.log(
+    "PASS saved owned orders show gross-only evidence and exact preset after reload",
+  );
+  const exportCalls = [];
+  await page.route("**/api/paper/evidence?*", async (route) => {
+    const u = new URL(route.request().url()),
+      after = u.searchParams.get("after");
+    exportCalls.push(Object.fromEntries(u.searchParams));
+    await route.fulfill({
+      json: {
+        observations: [{ seq: after === "0" ? 1 : 2 }],
+        next_after: after === "0" ? 1 : 2,
+        through: 2,
+        has_more: after === "0",
+      },
+    });
+  });
+  const downloaded = page.waitForEvent("download");
+  await journal
+    .getByRole("button", { name: "Export saved paper evidence", exact: true })
+    .click();
+  const file = await downloaded;
+  const exported = JSON.parse(await readFile(await file.path(), "utf8"));
+  assert.deepEqual(
+    exported.observations.map((o) => o.seq),
+    [1, 2],
+  );
+  assert.deepEqual(exportCalls, [{ after: "0" }, { after: "1", through: "2" }]);
+  assert.equal(exported.report.attempts[0].net_pnl_usd, null);
+  console.log(
+    "PASS paper evidence export follows a frozen cursor and retains unavailable net P&L",
+  );
+  const refreshCalls = [];
+  await page.route("**/api/paper/evidence/refresh", async (route) => {
+    refreshCalls.push(route.request().postDataJSON());
+    evidence = {
+      ...evidence,
+      entries_blocked: true,
+      holds: [{ day: session, reason: "cumulative_quantity_decreased" }],
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        state: "correction_hold",
+        gross_price_pnl_usd: null,
+        hold_reason: "cumulative_quantity_decreased",
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await journal
+    .getByRole("button", { name: `Refresh evidence ${session}`, exact: true })
+    .click();
+  await journal
+    .getByText("Closed gross estimate: Unavailable", { exact: true })
+    .waitFor();
+  assert.match(
+    await journal.textContent(),
+    /automatic broker actions are blocked/,
+  );
+  assert.deepEqual(refreshCalls, [{ session }]);
+  assert.equal(posts.length, 1);
+  await page.getByRole("button", { name: "Close panel", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Start paper trading", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await page.reload();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByText("Review required", { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Start paper trading", exact: true })
+      .isDisabled(),
+    true,
+  );
+  console.log(
+    "PASS read-only evidence refresh exposes persistent correction hold without resubmission",
+  );
   for (const width of [390, 768, 1500]) {
     await page.setViewportSize({ width, height: 1000 });
     assert(

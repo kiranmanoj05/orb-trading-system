@@ -4,6 +4,7 @@ Broker state is authoritative. Intent commits before POST; uncertain POSTs are
 looked up, never resent. A file lock excludes competing conforming workers.
 """
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from hashlib import sha256
 import fcntl
@@ -24,6 +25,7 @@ from orb.research_settings import ResearchSettings
 from orb.risk import AccountSnapshot, size_long
 from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
+from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 
 BROKER = 'https://paper-api.alpaca.markets'
 DATA = 'https://data.alpaca.markets'
@@ -110,11 +112,12 @@ class PaperEngine:
     bracket, verify terminal legs, then sell only reconciled residual quantity.
     Shutdown leaves broker exits intact. Restart requires explicit Start.
     """
-    def __init__(self, path, client=None):
+    def __init__(self, path, client=None, *, observation_clock=None):
         self.path = Path(path)
         if self.path.is_symlink(): raise PaperError("Paper state symlinks are not supported.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.client = client
+        self.observation_clock = observation_clock or monotonic
         self.lock = RLock()
         self.file_lock = self.thread = None
         self.quit = Event()
@@ -124,8 +127,10 @@ class PaperEngine:
         self.feed = 'iex'
         self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
+        migration_lock = None
         try:
             self.db.execute('PRAGMA synchronous=FULL')
+            self.db.execute('PRAGMA foreign_keys=ON')
             self.db.execute('BEGIN IMMEDIATE')
             identity = self.db.execute('PRAGMA application_id').fetchone()[0]
             version = self.db.execute('PRAGMA user_version').fetchone()[0]
@@ -136,10 +141,34 @@ class PaperEngine:
                                 'request TEXT NOT NULL, preset TEXT NOT NULL, closing TEXT, state TEXT NOT NULL)')
                 self.db.execute('PRAGMA application_id=1330795600')
                 self.db.execute('PRAGMA user_version=1')
-            elif identity != 1330795600 or version != 1 or tables != {'paper_meta', 'paper_attempts'}:
+                identity, version, tables = 1330795600, 1, {'paper_meta', 'paper_attempts'}
+            if identity == 1330795600 and version == 1 and tables == {'paper_meta', 'paper_attempts'}:
+                lock_path = self.path.with_suffix('.lock')
+                if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
+                migration_lock = lock_path.open('a')
+                try: fcntl.flock(migration_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise PaperError('Stop the existing paper worker before upgrading its database.') from None
+                install_evidence(self.db)
+                self.db.execute('PRAGMA user_version=2')
+            elif identity != 1330795600 or version != 2 or tables != {'paper_meta', 'paper_attempts'} | EVIDENCE_TABLES:
                 raise PaperError('Unrecognised paper database; no changes made.')
+            columns = {
+                'paper_meta': {'key', 'value'},
+                'paper_attempts': {'day', 'client_id', 'request', 'preset', 'closing', 'state'},
+                'paper_observations': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'},
+                'paper_observation_heads': {'day', 'seq', 'last_seen_at'},
+                'paper_evidence_holds': {'day', 'reason', 'observed_at'}}
+            for table, expected in columns.items():
+                if {r[1] for r in self.db.execute(f'PRAGMA table_info({table})')} != expected:
+                    raise PaperError('Unrecognised paper database columns; no changes made.')
             self.db.execute('COMMIT')
+            if migration_lock: migration_lock.close()
+            self.evidence = PaperEvidence(self.db)
+            if self.evidence.holds():
+                self.message = 'Saved broker evidence requires review. Automatic broker actions are blocked.'
         except BaseException:
+            if migration_lock: migration_lock.close()
             self.db.close()
             raise
 
@@ -152,6 +181,7 @@ class PaperEngine:
         with self.lock:
             return dict(enabled=self.enabled, environment='paper', symbol='SPY', feed=self.feed,
                         message=self.message, updated_at=self.updated_at, preset=self.record, market=self.market,
+                        evidence=self.evidence.report(),
                         attempts=[dict(r) | {'request': json.loads(r['request']), 'preset': json.loads(r['preset'])}
                                   for r in self.db.execute('SELECT * FROM paper_attempts ORDER BY day DESC LIMIT 20')])
 
@@ -172,6 +202,7 @@ class PaperEngine:
         settings = self.validate(record, feed)
         with self.lock:
             if self.enabled: raise PaperError('Paper worker already running; stop before changing settings.')
+            if self.evidence.report()['entries_blocked']: raise PaperError('Saved broker evidence has a correction hold. Inspect Alpaca; automatic restart is blocked.')
             if self.thread and self.thread.is_alive():
                 # Existing management thread can rearm without spawning a competitor.
                 self.settings, self.record, self.feed = settings, json.loads(json.dumps(record)), feed
@@ -235,6 +266,8 @@ class PaperEngine:
     def tick(self, now):
         started = monotonic()
         self.updated_at = now.isoformat()
+        if self.evidence.report()['entries_blocked']:
+            raise PaperError('Saved broker evidence has a correction hold. Automatic broker actions are blocked; inspect Alpaca.')
         clock = self.client.request('GET', '/v2/clock')
         if abs(now - timestamp(clock['timestamp'])) > timedelta(seconds=30): raise PaperError('Broker clock is stale.')
         if type(clock.get('is_open')) is not bool: raise PaperError('Missing market-open evidence.')
@@ -359,11 +392,16 @@ class PaperEngine:
         return bars
 
     def manage(self, row, now, is_open):
+        started = self.observation_clock()
         parent = self.client.find(row['client_id'])
         if parent is None:
+            self.capture_evidence(row, None, None, now + timedelta(seconds=self.observation_clock() - started))
             self.message = 'Uncertain order: intent saved, broker order not found. No automatic resubmission. Inspect Alpaca.'
             return False
         parent = self.client.order(parent['id'])
+        close_request = json.loads(row['closing']) if row['closing'] else None
+        close_order = self.client.find(close_request['client_order_id']) if close_request else None
+        self.capture_evidence(row, parent, close_order, now + timedelta(seconds=self.observation_clock() - started))
         expected = json.loads(row['request'])
         if (parent.get('client_order_id') != row['client_id'] or parent.get('symbol') != 'SPY'
                 or parent.get('side') != 'buy' or decimal(parent.get('qty')) != decimal(expected['qty'])
@@ -384,10 +422,6 @@ class PaperEngine:
         if residual < 0: raise PaperError('Bracket exits exceed entry fills.')
         # Empty/truncated nested responses are unknown protection, never proof
         # that both exits were canceled. Do not cancel or sell from this state.
-        if len(legs) != 2 and (entry_filled > 0 or parent['status'] not in TERMINAL):
-            raise PaperError('Incomplete bracket leg evidence; inspect Alpaca protection. No automatic close.')
-        close_request = json.loads(row['closing']) if row['closing'] else None
-        close_order = self.client.find(close_request['client_order_id']) if close_request else None
         if close_request and close_order is None:
             self.message = 'Uncertain closing order; not resent. Inspect Alpaca.'
             return False
@@ -400,6 +434,8 @@ class PaperEngine:
                 raise PaperError('Closing order identity changed.')
             residual -= decimal(close_order['filled_qty'])
         if residual < 0: raise PaperError('Closing fills exceed entry fills.')
+        if len(legs) != 2 and (entry_filled > 0 or parent['status'] not in TERMINAL):
+            raise PaperError('Incomplete bracket leg evidence; inspect Alpaca protection. No automatic close.')
         if close_order and close_order['status'] in TERMINAL and residual > 0:
             raise PaperError('Closing order ended with remaining ORB quantity; inspect Alpaca. No automatic resubmission.')
         terminal = parent['status'] in TERMINAL and all(o['status'] in TERMINAL for o in legs)
@@ -433,3 +469,59 @@ class PaperEngine:
         self.message = 'Managing existing paper bracket; no new entry.'
         if is_open and day_session.day == now.astimezone(NEW_YORK).date(): self.update_market(day_session, now)
         return False
+
+    def capture_evidence(self, row, parent, closing, now):
+        try:
+            self.evidence.capture(row, parent, closing, now.isoformat())
+        except EvidenceError as exc:
+            self.enabled = False
+            label = 'Closing order' if row['closing'] else 'Owned order'
+            raise PaperError(f'{label} evidence failed ({exc}); preserve the database and inspect Alpaca.') from None
+        if self.evidence.holds():
+            self.enabled = False
+            raise PaperError('Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.')
+
+    def evidence_events(self, after=0, through=None):
+        with self.lock: return self.evidence.events(after, through=through)
+
+    @contextmanager
+    def evidence_write_lease(self):
+        if self.file_lock is not None:
+            yield
+            return
+        path = self.path.with_suffix('.lock')
+        if path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
+        with path.open('a') as fd:
+            try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise PaperError('Another paper worker owns this state; refresh evidence in its dashboard.') from None
+            yield
+
+    def refresh_evidence(self, day):
+        """Explicit read-only re-observation, including completed saved attempts.
+
+        No management/cancel/submit method is called. Account scope must match
+        before even the first owned-order lookup; a refresh never clears a hold.
+        """
+        with self.lock, self.evidence_write_lease():
+            row = self.db.execute('SELECT * FROM paper_attempts WHERE day=?', (day,)).fetchone()
+            if not row: raise KeyError('No saved ORB attempt for this session.')
+            client = self.client or PaperClient()
+            account = client.request('GET', '/v2/account')
+            if not isinstance(account, dict) or not isinstance(account.get('id'), str):
+                raise PaperError('Missing broker account-scope evidence.')
+            if sha256(account['id'].encode()).hexdigest() != self.meta('account'):
+                raise PaperError('Database belongs to a different paper account.')
+            parent = client.find(row['client_id'])
+            if parent is not None: parent = client.order(parent['id'])
+            request = json.loads(row['closing']) if row['closing'] else None
+            closing = client.find(request['client_order_id']) if request else None
+            try:
+                self.evidence.capture(row, parent, closing, datetime.now(timezone.utc).isoformat())
+            except EvidenceError:
+                self.enabled = False
+                raise PaperError('Paper evidence could not be verified; preserve the database and inspect Alpaca.') from None
+            if self.evidence.holds():
+                self.enabled = False
+                self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
+            return self.evidence.report()

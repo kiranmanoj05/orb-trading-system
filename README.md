@@ -11,6 +11,9 @@ A fixed-share execution simulator records next-minute fills, exits and net P&L.
 A pure cost-aware sizing calculator and sequential shared account ledger are
 connected through chronological shared-account portfolio replay.
 A bounded SPY-only local paper worker is now available; see [paper execution](docs/paper-trading.md).
+Its [saved order evidence](docs/paper-evidence.md) retains intent-linked cumulative
+observations, explicit incomplete outcomes, gross-only closed estimates and
+persistent correction holds.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

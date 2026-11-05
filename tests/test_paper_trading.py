@@ -59,7 +59,7 @@ class Broker:
 
 def engine(tmp_path, broker=None):
     b = broker or Broker()
-    e = PaperEngine(tmp_path / 'paper.sqlite', b)
+    e = PaperEngine(tmp_path / 'paper.sqlite', b, observation_clock=lambda: 0)
     e.settings = e.validate(PresetStore.paper('paper-balanced'), 'iex')
     e.record = PresetStore.paper('paper-balanced')
     e.enabled = True
@@ -365,11 +365,11 @@ def test_closing_failures_or_changed_identity_never_resubmit(tmp_path, change):
     if change == 'replaced': b.closing['replaced_by'] = 'unknown-replacement'
     if change == 'wrong_qty': b.closing['qty'] = '5'
     if change == 'overfill': b.closing['filled_qty'] = '5'
-    with pytest.raises(PaperError, match='Closing order'):
+    with pytest.raises(PaperError, match='Closing order|correction'):
         e.tick(NOW)
     e.close()
     e, b = engine(tmp_path, b)
-    with pytest.raises(PaperError, match='Closing order'):
+    with pytest.raises(PaperError, match='Closing order|correction'):
         e.tick(NOW)
     assert len(b.posts) == 2 and e.status()['attempts'][0]['state'] != 'done'
     e.close()

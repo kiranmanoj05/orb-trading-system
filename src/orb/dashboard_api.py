@@ -2,6 +2,7 @@
 
 import argparse
 from contextlib import asynccontextmanager
+from datetime import date
 import sqlite3
 from decimal import InvalidOperation
 import json
@@ -13,6 +14,7 @@ from orb.dashboard_alpaca import connection_status, observe_paper, fetch_run, lo
 from orb.acquisition import AcquisitionError
 from orb.paper_snapshot import PaperSnapshotError
 from orb.paper_trading import PaperEngine, PaperError
+from orb.paper_evidence import EvidenceError
 from threading import Lock
 from orb.profile_runs import apply_preset
 
@@ -53,6 +55,11 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.presets = store
     app.state.research = research
+    app.state.paper_engine = paper_engine
+
+    @app.exception_handler(EvidenceError)
+    async def paper_evidence_error(request, exc):
+        return JSONResponse({'detail': 'Saved paper evidence failed validation; preserve the database for review.'}, status_code=503)
 
     @app.exception_handler(ResearchIntegrityError)
     async def archive_error(request, exc):
@@ -135,6 +142,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
                 raise ValueError('exact saved preset required')
             record = store.get(p['preset_id'], p['version'])
             return await run_in_threadpool(paper_engine.start, record, p['feed'])
+        except EvidenceError: raise
         except (ValueError, KeyError, TypeError) as exc:
             if isinstance(exc, (PaperError, AcquisitionError)): raise HTTPException(409, str(exc)) from None
             raise HTTPException(422, 'Invalid paper preset request.') from None
@@ -144,6 +152,28 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         await empty_command(request)
         if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
         return await run_in_threadpool(paper_engine.stop)
+
+    @app.get('/api/paper/evidence')
+    async def paper_evidence(after: int = 0, through: int | None = None):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        if not 0 <= after <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
+        if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
+        return await run_in_threadpool(paper_engine.evidence_events, after, through)
+
+    @app.post('/api/paper/evidence/refresh')
+    async def refresh_paper_evidence(request: Request):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        p = await read_json(request, 1024)
+        if not isinstance(p, dict) or set(p) != {'session'} or not isinstance(p['session'], str):
+            raise HTTPException(422, 'Select an exact saved session.')
+        try:
+            day = date.fromisoformat(p['session'])
+            if str(day) != p['session']: raise ValueError('noncanonical date')
+        except ValueError: raise HTTPException(422, 'Select an exact saved session.') from None
+        try:
+            return await run_in_threadpool(paper_engine.refresh_evidence, str(day))
+        except KeyError: raise HTTPException(404, 'No saved ORB attempt for this session.') from None
+        except (PaperError, AcquisitionError) as exc: raise HTTPException(409, str(exc)) from None
 
     @app.get('/api/alpaca/status')
     async def alpaca_status():

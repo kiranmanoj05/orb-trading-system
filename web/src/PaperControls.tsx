@@ -53,7 +53,13 @@ export default function PaperControls({
     <section className="glass panel paper-controls">
       <div className="section-head">
         <h2>Paper trading</h2>
-        <span className="pill">{status?.enabled ? "Running" : "Stopped"}</span>
+        <span className="pill">
+          {status?.evidence?.entries_blocked
+            ? "Review required"
+            : status?.enabled
+              ? "Running"
+              : "Stopped"}
+        </span>
       </div>
       <p className="drawer-note">{status?.message || "Checking worker…"}</p>
       <div className="selectors">
@@ -101,7 +107,13 @@ export default function PaperControls({
       <div className="mode-switch">
         <button
           className="primary"
-          disabled={busy || status?.enabled || !selected || !status?.available}
+          disabled={
+            busy ||
+            status?.enabled ||
+            status?.evidence?.entries_blocked ||
+            !selected ||
+            !status?.available
+          }
           onClick={() => action(true)}
         >
           {busy ? "Working…" : "Start paper trading"}
