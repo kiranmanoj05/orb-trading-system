@@ -101,3 +101,14 @@ full immutable broker execution/P&L ledger remain future work.
 
 Alpaca references: [order lifecycle and brackets](https://docs.alpaca.markets/us/docs/orders-at-alpaca),
 [client order lookup](https://docs.alpaca.markets/us/reference/getorderbyclientorderid).
+
+## Saved order evidence
+
+Trades now includes a durable intent-linked journal, read-only refresh for a saved
+session and paginated export. Closed gross price P&L is an estimate from cumulative
+broker averages; fees/net P&L are unavailable. Open/missing/corrected outcomes stay
+explicit. Persistent correction holds block automatic broker actions and cannot
+be cleared by Start, refresh or restart. Schema v1→v2 migration preserves existing
+intents/account/loss state and requires the old worker to be stopped. Read the
+[scope, states and operating limits](paper-evidence.md). This is not a full
+individual-execution ledger or atomic integration of the offline coordinator.

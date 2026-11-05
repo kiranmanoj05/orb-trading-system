@@ -1,0 +1,167 @@
+import React, { useState } from "react";
+type Row = Record<string, any>;
+const amount = (v: any) =>
+  v == null
+    ? "Unavailable"
+    : new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+      }).format(Number(v));
+const words = (v: string) => v.replaceAll("_", " ");
+export default function PaperEvidence({
+  report,
+  changed,
+}: {
+  report?: Row;
+  changed: (value: Row) => void;
+}) {
+  const [busy, setBusy] = useState(""),
+    [error, setError] = useState("");
+  async function refresh(session: string) {
+    setBusy(session);
+    setError("");
+    try {
+      const r = await fetch("/api/paper/evidence/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session }),
+      });
+      const data = await r.json();
+      if (!r.ok)
+        throw new Error(
+          data.detail || "Could not refresh saved order evidence.",
+        );
+      changed(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Evidence refresh failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function exportHistory() {
+    setBusy("export");
+    setError("");
+    try {
+      let after = 0,
+        through: number | undefined;
+      const observations: Row[] = [];
+      for (let page = 0; page < 100; page++) {
+        const r = await fetch(
+          `/api/paper/evidence?after=${after}${through === undefined ? "" : `&through=${through}`}`,
+        );
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || "Evidence export failed.");
+        through ??= data.through;
+        observations.push(...data.observations);
+        if (!data.has_more) {
+          const url = URL.createObjectURL(
+            new Blob(
+              [
+                JSON.stringify(
+                  {
+                    schema_version: "orb-paper-evidence-download-v1",
+                    report,
+                    through,
+                    observations,
+                    notice:
+                      "Cumulative order observations; report and export have separate observation times. No individual executions, fees or net P&L.",
+                  },
+                  null,
+                  2,
+                ),
+              ],
+              { type: "application/json" },
+            ),
+          );
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "orb-paper-evidence.json";
+          a.click();
+          URL.revokeObjectURL(url);
+          return;
+        }
+        if (data.next_after <= after)
+          throw new Error("Evidence cursor did not advance.");
+        after = data.next_after;
+      }
+      throw new Error(
+        "Export exceeded the local evidence bound; no partial download was created.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Evidence export failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+  return (
+    <section aria-label="Saved ORB paper evidence">
+      <h3>Saved ORB attempts</h3>
+      <p className="drawer-note">
+        Durable intent-linked orders. Closed gross estimates use cumulative
+        broker averages. Fees and net P&L are unavailable; this is separate from
+        backtests and account equity.
+      </p>
+      {report?.entries_blocked && (
+        <p role="alert" className="warning">
+          Broker correction hold: automatic broker actions are blocked. Inspect
+          Alpaca; refreshing evidence does not clear the hold.
+        </p>
+      )}
+      {!report?.attempts?.length && (
+        <p>
+          No saved ORB attempts yet. Account orders below are not automatically
+          attributed to the bot.
+        </p>
+      )}
+      {report?.attempts_may_be_truncated && (
+        <p className="warning">
+          Latest 100 attempts shown. Export retains the paginated observation
+          history.
+        </p>
+      )}
+      {report?.attempts?.map((a: Row) => (
+        <article className="broker-order" key={a.session}>
+          <strong>SPY · {a.session}</strong>
+          <span>{words(a.state)}</span>
+          <small>
+            {a.preset_name} v{a.preset_version} · entry{" "}
+            {a.entry_filled ?? "unknown"} / exit {a.exit_filled ?? "unknown"}{" "}
+            shares
+          </small>
+          <span>Closed gross estimate: {amount(a.gross_price_pnl_usd)}</span>
+          <small>Net P&L: Unavailable · fees not captured</small>
+          <small>Last observed: {a.observed_at || "not observed"}</small>
+          {a.hold_reason && (
+            <p className="warning">Review required: {words(a.hold_reason)}</p>
+          )}
+          <button disabled={!!busy} onClick={() => refresh(a.session)}>
+            {busy === a.session
+              ? "Reading broker…"
+              : `Refresh evidence ${a.session}`}
+          </button>
+          <details>
+            <summary>Order observations</summary>
+            {a.orders.map((o: Row) => (
+              <p key={o.id}>
+                {words(o.role)} · {o.side} · {words(o.status)} ·{" "}
+                {o.filled_quantity} @ {amount(o.average_fill_price)} ·{" "}
+                {o.filled_at || "fill timestamp unavailable"}
+              </p>
+            ))}
+          </details>
+        </article>
+      ))}
+      <button
+        disabled={!!busy || !report?.attempts?.length}
+        onClick={exportHistory}
+      >
+        Export saved paper evidence
+      </button>
+      {error && (
+        <p className="warning" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}

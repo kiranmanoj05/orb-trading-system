@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import Presets from "./Presets";
 import PaperControls from "./PaperControls";
+import PaperEvidence from "./PaperEvidence";
 import ResearchJobs from "./ResearchJobs";
 import Comparisons from "./Comparisons";
 import CandleChart from "./CandleChart";
@@ -520,9 +521,13 @@ function App() {
   const sessions: string[] = run
     ? [...new Set<string>(evidence!.coverage.map((c: Row) => c.session))]
     : [];
-  const paperFills = (paper?.orders || []).filter(
-    (o: Row) => Number(o.filled_quantity) > 0,
-  );
+  const paperFills = Array.from(
+    new Map<string, Row>(
+      [...(paper?.orders || []), ...(paperState?.evidence?.orders || [])].map(
+        (o: Row) => [o.id, o] as [string, Row],
+      ),
+    ).values(),
+  ).filter((o: Row) => Number(o.filled_quantity) > 0);
   function select(d: Row) {
     setChosen(d.signal_id);
     setSymbol(d.symbol);
@@ -958,9 +963,19 @@ function App() {
           {panel === "Trades" &&
             (mode === "paper" ? (
               <>
+                <PaperEvidence
+                  report={paperState?.evidence}
+                  changed={(value) =>
+                    setPaperState((old) => ({
+                      ...old,
+                      evidence: value,
+                      enabled: value.entries_blocked ? false : old?.enabled,
+                    }))
+                  }
+                />
                 <p className="drawer-note">
-                  Broker orders and confirmed cumulative fills. Paper charts
-                  never show simulated entries.
+                  Latest account orders (ORB attribution unknown) and cumulative
+                  fills. Paper charts never show simulated entries.
                 </p>
                 {paper?.history_may_be_truncated && (
                   <p className="warning">
