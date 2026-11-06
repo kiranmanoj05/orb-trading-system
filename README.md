@@ -14,6 +14,9 @@ A bounded SPY-only local paper worker is now available; see [paper execution](do
 Its [saved order evidence](docs/paper-evidence.md) retains intent-linked cumulative
 observations, explicit incomplete outcomes, gross-only closed estimates and
 persistent correction holds.
+Read-only [fill activity history](docs/paper-fill-activities.md) adds individual
+reported fills, explicit quantity mismatches and separate gross estimates;
+fees/net P&L and reviewed correction resolution remain unavailable.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

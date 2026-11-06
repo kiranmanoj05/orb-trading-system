@@ -160,7 +160,15 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         return await run_in_threadpool(paper_engine.evidence_events, after, through)
 
+    @app.get('/api/paper/activities')
+    async def paper_activities(after: int = 0, through: int | None = None):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        if not 0 <= after <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
+        if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
+        return await run_in_threadpool(paper_engine.activity_events, after, through)
+
     @app.post('/api/paper/evidence/refresh')
+    @app.post('/api/paper/activities/refresh')
     async def refresh_paper_evidence(request: Request):
         if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
         p = await read_json(request, 1024)
@@ -171,7 +179,8 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
             if str(day) != p['session']: raise ValueError('noncanonical date')
         except ValueError: raise HTTPException(422, 'Select an exact saved session.') from None
         try:
-            return await run_in_threadpool(paper_engine.refresh_evidence, str(day))
+            method = paper_engine.refresh_activities if request.url.path.endswith('/activities/refresh') else paper_engine.refresh_evidence
+            return await run_in_threadpool(method, str(day))
         except KeyError: raise HTTPException(404, 'No saved ORB attempt for this session.') from None
         except (PaperError, AcquisitionError) as exc: raise HTTPException(409, str(exc)) from None
 

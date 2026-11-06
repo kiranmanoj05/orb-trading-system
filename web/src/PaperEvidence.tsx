@@ -17,15 +17,20 @@ export default function PaperEvidence({
 }) {
   const [busy, setBusy] = useState(""),
     [error, setError] = useState("");
-  async function refresh(session: string) {
+  async function refresh(session: string, activities = false) {
     setBusy(session);
     setError("");
     try {
-      const r = await fetch("/api/paper/evidence/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session }),
-      });
+      const r = await fetch(
+        activities
+          ? "/api/paper/activities/refresh"
+          : "/api/paper/evidence/refresh",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session }),
+        },
+      );
       const data = await r.json();
       if (!r.ok)
         throw new Error(
@@ -54,17 +59,44 @@ export default function PaperEvidence({
         through ??= data.through;
         observations.push(...data.observations);
         if (!data.has_more) {
+          const fills: Row[] = [];
+          let fillAfter = 0,
+            fillThrough: number | undefined,
+            fillFinished = false;
+          for (let p = 0; p < 100; p++) {
+            const response = await fetch(
+              `/api/paper/activities?after=${fillAfter}${fillThrough === undefined ? "" : `&through=${fillThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Fill activity export failed.");
+            fillThrough ??= history.through;
+            fills.push(...history.events);
+            if (!history.has_more) {
+              fillFinished = true;
+              break;
+            }
+            if (history.next_after <= fillAfter)
+              throw new Error("Activity cursor did not advance.");
+            fillAfter = history.next_after;
+          }
+          if (!fillFinished)
+            throw new Error(
+              "Activity export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v1",
+                    schema_version: "orb-paper-evidence-download-v2",
                     report,
                     through,
                     observations,
+                    fill_activities: fills,
+                    activities_through: fillThrough,
                     notice:
-                      "Cumulative order observations; report and export have separate observation times. No individual executions, fees or net P&L.",
+                      "Cumulative order observations and reported FILL activities; streams have separate observation times/watermarks. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,
@@ -139,6 +171,59 @@ export default function PaperEvidence({
               ? "Reading broker…"
               : `Refresh evidence ${a.session}`}
           </button>
+          <button disabled={!!busy} onClick={() => refresh(a.session, true)}>
+            {`Read fill activities ${a.session}`}
+          </button>
+          <details>
+            <summary>
+              Fill activities ·{" "}
+              {words(a.fill_activities?.state || "not_observed")}
+            </summary>
+            <p className="drawer-note">
+              Reported individual fills matched to saved orders. Quantity
+              agreement does not prove complete executions or reconciliation.
+              Fees and net P&amp;L remain unavailable.
+            </p>
+            {a.fill_activities?.scan && (
+              <p>
+                Scan{" "}
+                {a.fill_activities.scan.scan_finished
+                  ? "finished"
+                  : "incomplete"}{" "}
+                · observed {a.fill_activities.scan.observed_at} ·{" "}
+                {a.fill_activities.scan.pages} page(s)
+                {a.fill_activities.scan.failure
+                  ? ` · ${words(a.fill_activities.scan.failure)}`
+                  : ""}
+              </p>
+            )}
+            <p>
+              Activity gross estimate:{" "}
+              {amount(a.fill_activities?.gross_price_pnl_usd)}
+            </p>
+            <p>Reported activities: {a.fill_activities?.event_count ?? 0}</p>
+            {a.fill_activities?.events?.map((f: Row) => (
+              <p key={f.seq}>
+                {f.side} {f.quantity} shares @ {amount(f.price)} ·{" "}
+                {f.transaction_time} · first observed {f.first_observed_at}
+              </p>
+            ))}
+            {a.fill_activities?.events_truncated && (
+              <p>
+                First 100 activity versions shown; export includes retained
+                history.
+              </p>
+            )}
+            {a.fill_activities?.orders?.map((o: Row) => (
+              <p key={o.order_id}>
+                {words(o.role)} · activity {o.activity_quantity} / order{" "}
+                {o.snapshot_quantity} shares ·{" "}
+                {o.quantities_agree ? "quantities agree" : "quantity mismatch"}{" "}
+                · activity average {amount(o.activity_average)} / order average{" "}
+                {amount(o.snapshot_average)}
+              </p>
+            ))}
+          </details>
           <details>
             <summary>Order observations</summary>
             {a.orders.map((o: Row) => (

@@ -279,6 +279,101 @@ try {
   console.log(
     "PASS saved owned orders show gross-only evidence and exact preset after reload",
   );
+  const activityReads = [];
+  await page.route("**/api/paper/activities/refresh", async (route) => {
+    activityReads.push(route.request().postDataJSON());
+    const incomplete = activityReads.length === 1;
+    evidence = {
+      ...evidence,
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        fill_activities: {
+          state: incomplete ? "quantity_mismatch" : "closed_quantities_agree",
+          scan: {
+            scan_finished: true,
+            pages: 1,
+            observed_at: "2026-11-06T19:00:00Z",
+          },
+          gross_price_pnl_usd: incomplete ? null : "5.1",
+          net_pnl_usd: null,
+          fees_usd: null,
+          event_count: incomplete ? 1 : 2,
+          events: [
+            {
+              seq: 1,
+              side: "buy",
+              quantity: "3",
+              price: "100.3",
+              transaction_time: "2026-11-02T14:46:00Z",
+              first_observed_at: "2026-11-06T19:00:00Z",
+            },
+          ],
+          orders: [
+            {
+              order_id: "owned-entry",
+              role: "entry",
+              activity_quantity: "3",
+              snapshot_quantity: "3",
+              quantities_agree: true,
+              activity_average: "100.3",
+              snapshot_average: "100.3",
+            },
+          ],
+        },
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await journal
+    .getByRole("button", {
+      name: `Read fill activities ${session}`,
+      exact: true,
+    })
+    .click();
+  await journal
+    .getByText("Fill activities · quantity mismatch", { exact: true })
+    .waitFor();
+  await journal
+    .getByText("Fill activities · quantity mismatch", { exact: true })
+    .click();
+  await journal
+    .getByText("Activity gross estimate: Unavailable", { exact: true })
+    .waitFor();
+  await journal
+    .getByRole("button", {
+      name: `Read fill activities ${session}`,
+      exact: true,
+    })
+    .click();
+  await journal
+    .getByText("Fill activities · closed quantities agree", { exact: true })
+    .waitFor();
+  await journal
+    .getByText("Activity gross estimate: $5.10", { exact: true })
+    .waitFor();
+  assert.match(
+    await journal.textContent(),
+    /Quantity agreement does not prove complete executions/,
+  );
+  assert.deepEqual(activityReads, [{ session }, { session }]);
+  assert.equal(posts.length, 1);
+  console.log(
+    "PASS read-only individual fill review preserves mismatch/unavailable and separates event from observation times",
+  );
+  const fillExportCalls = [];
+  await page.route("**/api/paper/activities?*", async (route) => {
+    const u = new URL(route.request().url()),
+      after = u.searchParams.get("after");
+    fillExportCalls.push(Object.fromEntries(u.searchParams));
+    await route.fulfill({
+      json: {
+        events: [{ seq: after === "0" ? 10 : 11, fees_usd: null }],
+        next_after: after === "0" ? 10 : 11,
+        through: 11,
+        has_more: after === "0",
+      },
+    });
+  });
   const exportCalls = [];
   await page.route("**/api/paper/evidence?*", async (route) => {
     const u = new URL(route.request().url()),
@@ -305,8 +400,18 @@ try {
   );
   assert.deepEqual(exportCalls, [{ after: "0" }, { after: "1", through: "2" }]);
   assert.equal(exported.report.attempts[0].net_pnl_usd, null);
+  assert.deepEqual(
+    exported.fill_activities.map((e) => e.seq),
+    [10, 11],
+  );
+  assert.deepEqual(fillExportCalls, [
+    { after: "0" },
+    { after: "10", through: "11" },
+  ]);
+  assert.equal(exported.activities_through, 11);
+  assert.equal(exported.fill_activities[0].fees_usd, null);
   console.log(
-    "PASS paper evidence export follows a frozen cursor and retains unavailable net P&L",
+    "PASS snapshot and individual fill exports use separate frozen cursors and retain unavailable fees/net",
   );
   const refreshCalls = [];
   await page.route("**/api/paper/evidence/refresh", async (route) => {
