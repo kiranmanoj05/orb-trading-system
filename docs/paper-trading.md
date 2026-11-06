@@ -1,5 +1,9 @@
 # Paper execution v1
 
+Saved attempts now support [read-only fill activity review](paper-fill-activities.md)
+in Trades, including separate event and observation times. This does not clear
+holds or establish complete executions, fees/net P&L or account reconciliation.
+
 This adds a **paper-only**, local background worker. Historical backtests are
 separate from broker activity. The worker cannot select a live broker URL.
 The account balance is Alpaca paper equity; it does not include backtest P&L.

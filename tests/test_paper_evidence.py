@@ -188,7 +188,7 @@ def test_v1_migration_preserves_intents_account_and_loss_latch(tmp_path):
     db.execute('INSERT INTO paper_attempts VALUES (?,?,?,?,?,?)',(DAY,'legacy',json.dumps(dict(qty='10')),json.dumps(PresetStore.paper('paper-balanced')),None,'done'))
     db.commit();db.close()
     e=PaperEngine(path)
-    assert e.meta('loss-blocked:'+DAY)=='yes' and e.db.execute('PRAGMA user_version').fetchone()[0]==2
+    assert e.meta('loss-blocked:'+DAY)=='yes' and e.db.execute('PRAGMA user_version').fetchone()[0]==3
     assert e.evidence.report()['attempts'][0]['state']=='not_observed'
     assert not e.enabled and not e.evidence.events()['observations']
     e.close()

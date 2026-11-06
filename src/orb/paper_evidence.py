@@ -242,6 +242,8 @@ class PaperEvidence:
                     notice='Locally observed cumulative order snapshots, not individual execution events or broker audit records.')
 
     def report(self):
+        from orb.paper_activities import PaperActivities
+        activities = PaperActivities(self.db)
         holds = {v['day']: v for v in self.holds()}
         rows = list(self.db.execute('SELECT * FROM paper_attempts ORDER BY day DESC LIMIT 101'))
         attempts, orders = [], []
@@ -279,7 +281,8 @@ class PaperEvidence:
                 exit_filled=canonical(exited) if exited is not None else None,
                 gross_price_pnl_usd=canonical(gross) if gross is not None else None, net_pnl_usd=None,
                 hold_reason=holds.get(row['day'], {}).get('reason'), observation_seq=h['seq'] if h else None,
-                orders=payload['orders'] if payload else []))
+                orders=payload['orders'] if payload else [],
+                fill_activities=activities.report(row['day'], payload['orders'] if payload else [], outcome, row['day'] in holds)))
         return dict(schema_version='orb-paper-evidence-report-v1', attempts=attempts, orders=orders,
                     holds=list(holds.values()), entries_blocked=bool(holds), attempts_may_be_truncated=len(rows) > 100,
                     notice='Saved ORB-owned cumulative snapshots. Closed gross price P&L is an estimate from broker averages; fees/net P&L unavailable. No account-wide reconciliation or execution-event completeness is implied.')

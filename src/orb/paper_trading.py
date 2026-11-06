@@ -3,7 +3,7 @@
 Broker state is authoritative. Intent commits before POST; uncertain POSTs are
 looked up, never resent. A file lock excludes competing conforming workers.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from contextlib import contextmanager
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from hashlib import sha256
@@ -26,6 +26,7 @@ from orb.risk import AccountSnapshot, size_long
 from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
+from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
 
 BROKER = 'https://paper-api.alpaca.markets'
 DATA = 'https://data.alpaca.markets'
@@ -142,23 +143,29 @@ class PaperEngine:
                 self.db.execute('PRAGMA application_id=1330795600')
                 self.db.execute('PRAGMA user_version=1')
                 identity, version, tables = 1330795600, 1, {'paper_meta', 'paper_attempts'}
-            if identity == 1330795600 and version == 1 and tables == {'paper_meta', 'paper_attempts'}:
+            expected_tables = {'paper_meta', 'paper_attempts'}
+            if version >= 2: expected_tables |= EVIDENCE_TABLES
+            if version >= 3: expected_tables |= ACTIVITY_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3) or tables != expected_tables:
+                raise PaperError('Unrecognised paper database; no changes made.')
+            if version in (1, 2):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
                 try: fcntl.flock(migration_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     raise PaperError('Stop the existing paper worker before upgrading its database.') from None
-                install_evidence(self.db)
-                self.db.execute('PRAGMA user_version=2')
-            elif identity != 1330795600 or version != 2 or tables != {'paper_meta', 'paper_attempts'} | EVIDENCE_TABLES:
-                raise PaperError('Unrecognised paper database; no changes made.')
+                if version == 1: install_evidence(self.db)
+                install_activities(self.db)
+                self.db.execute('PRAGMA user_version=3')
             columns = {
                 'paper_meta': {'key', 'value'},
                 'paper_attempts': {'day', 'client_id', 'request', 'preset', 'closing', 'state'},
                 'paper_observations': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'},
                 'paper_observation_heads': {'day', 'seq', 'last_seen_at'},
-                'paper_evidence_holds': {'day', 'reason', 'observed_at'}}
+                'paper_evidence_holds': {'day', 'reason', 'observed_at'},
+                'paper_fill_activities': {'seq', 'day', 'activity_id', 'observed_at', 'fingerprint', 'payload'},
+                'paper_activity_scans': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'}}
             for table, expected in columns.items():
                 if {r[1] for r in self.db.execute(f'PRAGMA table_info({table})')} != expected:
                     raise PaperError('Unrecognised paper database columns; no changes made.')
@@ -521,6 +528,44 @@ class PaperEngine:
             except EvidenceError:
                 self.enabled = False
                 raise PaperError('Paper evidence could not be verified; preserve the database and inspect Alpaca.') from None
+            if self.evidence.holds():
+                self.enabled = False
+                self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
+            return self.evidence.report()
+
+
+    def activity_events(self, after=0, through=None):
+        with self.lock: return PaperActivities(self.db).export(after, through)
+
+    def refresh_activities(self, day):
+        """Read-only history outside the worker lock; recheck lease/scope on commit."""
+        with self.lock, self.evidence_write_lease():
+            row = self.db.execute('SELECT * FROM paper_attempts WHERE day=?', (day,)).fetchone()
+            if not row: raise KeyError('No saved ORB attempt for this session.')
+            activities = PaperActivities(self.db)
+            known = activities.known_orders(day)
+            if not known: raise PaperError('Refresh order evidence first; no known owned order identities.')
+            client = self.client or PaperClient()
+            expected_account = self.meta('account')
+            expected_client_id = row['client_id']
+        # No SQLite or management lock spans these bounded network reads.
+        account = client.request('GET', '/v2/account')
+        if (not isinstance(account, dict) or not isinstance(account.get('id'), str)
+                or sha256(account['id'].encode()).hexdigest() != expected_account):
+            raise PaperError('Database belongs to a different paper account.')
+        until = datetime.now(timezone.utc).isoformat()
+        events, scan = fetch_activities(client, date.fromisoformat(day), known, until)
+        with self.lock, self.evidence_write_lease():
+            current = self.db.execute('SELECT * FROM paper_attempts WHERE day=?', (day,)).fetchone()
+            if not current or current['client_id'] != expected_client_id or self.meta('account') != expected_account:
+                raise PaperError('Paper evidence scope changed during history read; refresh again.')
+            # New closing identities may have appeared during the scan. Unknown
+            # activities are never retroactively claimed; a later refresh can match them.
+            try: activities.save(day, events, scan, datetime.now(timezone.utc).isoformat())
+            except EvidenceError as exc:
+                if str(exc) == 'stale_activity_scan':
+                    raise PaperError('A newer fill-activity scan was already saved; refresh again.') from None
+                raise
             if self.evidence.holds():
                 self.enabled = False
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'

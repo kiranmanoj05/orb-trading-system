@@ -1,5 +1,10 @@
 # Saved paper order evidence
 
+> Update: [Reported fill activities](paper-fill-activities.md) supplements these
+> snapshots with read-only individual FILL history, separate quantity/price
+> comparisons and a schema-v3 journal. Fees/net P&L and reviewed hold resolution
+> remain unavailable. The cumulative snapshots described here are unchanged.
+
 Trades → Saved ORB attempts now preserves local observations linked to the
 worker's durable session intent. This is separate from historical simulations,
 Alpaca account equity and the latest 500 unattributed account orders.
