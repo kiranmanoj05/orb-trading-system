@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PaperReview from "./PaperReview";
 type Row = Record<string, any>;
 const amount = (v: any) =>
   v == null
@@ -84,19 +85,73 @@ export default function PaperEvidence({
             throw new Error(
               "Activity export exceeded its bound; no partial download was created.",
             );
+          const reviews: Row[] = [];
+          let reviewAfter = 0,
+            reviewThrough: number | undefined,
+            reviewFinished = false;
+          for (let p = 0; p < 20; p++) {
+            const response = await fetch(
+              `/api/paper/reviews?after=${reviewAfter}${reviewThrough === undefined ? "" : `&through=${reviewThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Review export failed.");
+            reviewThrough ??= history.through;
+            reviews.push(...history.events);
+            if (!history.has_more) {
+              reviewFinished = true;
+              break;
+            }
+            if (history.next_after <= reviewAfter)
+              throw new Error("Review cursor did not advance.");
+            reviewAfter = history.next_after;
+          }
+          if (!reviewFinished)
+            throw new Error(
+              "Review export exceeded its bound; no partial download was created.",
+            );
+          const holds: Row[] = [];
+          let holdAfter = 0,
+            holdThrough: number | undefined,
+            holdFinished = false;
+          for (let p = 0; p < 100; p++) {
+            const response = await fetch(
+              `/api/paper/hold-events?after=${holdAfter}${holdThrough === undefined ? "" : `&through=${holdThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Hold history export failed.");
+            holdThrough ??= history.through;
+            holds.push(...history.events);
+            if (!history.has_more) {
+              holdFinished = true;
+              break;
+            }
+            if (history.next_after <= holdAfter)
+              throw new Error("Hold cursor did not advance.");
+            holdAfter = history.next_after;
+          }
+          if (!holdFinished)
+            throw new Error(
+              "Hold export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v2",
+                    schema_version: "orb-paper-evidence-download-v3",
                     report,
                     through,
                     observations,
                     fill_activities: fills,
                     activities_through: fillThrough,
+                    correction_reviews: reviews,
+                    reviews_through: reviewThrough,
+                    hold_events: holds,
+                    holds_through: holdThrough,
                     notice:
-                      "Cumulative order observations and reported FILL activities; streams have separate observation times/watermarks. No execution completeness, fees, net P&L or account reconciliation is established.",
+                      "Order observations, FILL activities and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,
@@ -165,6 +220,13 @@ export default function PaperEvidence({
           <small>Last observed: {a.observed_at || "not observed"}</small>
           {a.hold_reason && (
             <p className="warning">Review required: {words(a.hold_reason)}</p>
+          )}
+          {a.hold_reason && (
+            <PaperReview
+              session={a.session}
+              review={a.correction_review}
+              changed={changed}
+            />
           )}
           <button disabled={!!busy} onClick={() => refresh(a.session)}>
             {busy === a.session

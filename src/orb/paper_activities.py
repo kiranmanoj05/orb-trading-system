@@ -106,7 +106,8 @@ class PaperActivities:
         self.db.execute('BEGIN IMMEDIATE')
         try:
             def hold(reason):
-                self.db.execute('INSERT OR IGNORE INTO paper_evidence_holds VALUES (?,?,?)', (day, reason, at))
+                from orb.paper_reviews import record_hold
+                record_hold(self.db,day,reason,at,'fill_activity')
             old_scan = self.db.execute('SELECT * FROM paper_activity_scans WHERE day=? ORDER BY seq DESC LIMIT 1', (day,)).fetchone()
             if old_scan:
                 prior_scan = verified(old_scan)

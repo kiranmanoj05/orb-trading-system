@@ -172,13 +172,16 @@ def correction(previous, current):
 
 
 class PaperEvidence:
-    def __init__(self, db): self.db = db
+    def __init__(self, db, *, clock=None):
+        self.db = db
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def holds(self):
         return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')]
 
     def _hold(self, day, reason, at):
-        self.db.execute('INSERT OR IGNORE INTO paper_evidence_holds VALUES (?,?,?)', (day, reason, at))
+        from orb.paper_reviews import record_hold
+        record_hold(self.db,day,reason,at,'order_observation')
 
     def capture(self, row, parent, closing, observed_at):
         at = stamp(observed_at)
@@ -244,6 +247,8 @@ class PaperEvidence:
     def report(self):
         from orb.paper_activities import PaperActivities
         activities = PaperActivities(self.db)
+        from orb.paper_reviews import PaperReviews
+        reviews = PaperReviews(self.db)
         holds = {v['day']: v for v in self.holds()}
         rows = list(self.db.execute('SELECT * FROM paper_attempts ORDER BY day DESC LIMIT 101'))
         attempts, orders = [], []
@@ -282,7 +287,8 @@ class PaperEvidence:
                 gross_price_pnl_usd=canonical(gross) if gross is not None else None, net_pnl_usd=None,
                 hold_reason=holds.get(row['day'], {}).get('reason'), observation_seq=h['seq'] if h else None,
                 orders=payload['orders'] if payload else [],
-                fill_activities=activities.report(row['day'], payload['orders'] if payload else [], outcome, row['day'] in holds)))
+                fill_activities=activities.report(row['day'], payload['orders'] if payload else [], outcome, row['day'] in holds),
+                correction_review=reviews.report(row['day'],self.clock().isoformat()) if row['day'] in holds else None))
         return dict(schema_version='orb-paper-evidence-report-v1', attempts=attempts, orders=orders,
                     holds=list(holds.values()), entries_blocked=bool(holds), attempts_may_be_truncated=len(rows) > 100,
                     notice='Saved ORB-owned cumulative snapshots. Closed gross price P&L is an estimate from broker averages; fees/net P&L unavailable. No account-wide reconciliation or execution-event completeness is implied.')
