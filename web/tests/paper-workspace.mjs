@@ -388,6 +388,26 @@ try {
       },
     });
   });
+  const reviewExports = [],
+    holdExports = [];
+  for (const [path, calls] of [
+    ["reviews", reviewExports],
+    ["hold-events", holdExports],
+  ]) {
+    await page.route(`**/api/paper/${path}?*`, async (route) => {
+      const u = new URL(route.request().url()),
+        after = u.searchParams.get("after");
+      calls.push(Object.fromEntries(u.searchParams));
+      await route.fulfill({
+        json: {
+          events: [{ seq: after === "0" ? 20 : 21, kind: path }],
+          next_after: after === "0" ? 20 : 21,
+          through: 21,
+          has_more: after === "0",
+        },
+      });
+    });
+  }
   const downloaded = page.waitForEvent("download");
   await journal
     .getByRole("button", { name: "Export saved paper evidence", exact: true })
@@ -410,6 +430,22 @@ try {
   ]);
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
+  assert.deepEqual(
+    exported.correction_reviews.map((r) => r.seq),
+    [20, 21],
+  );
+  assert.deepEqual(
+    exported.hold_events.map((r) => r.seq),
+    [20, 21],
+  );
+  assert.deepEqual(reviewExports, [
+    { after: "0" },
+    { after: "20", through: "21" },
+  ]);
+  assert.deepEqual(holdExports, [
+    { after: "0" },
+    { after: "20", through: "21" },
+  ]);
   console.log(
     "PASS snapshot and individual fill exports use separate frozen cursors and retain unavailable fees/net",
   );
@@ -441,6 +477,121 @@ try {
   );
   assert.deepEqual(refreshCalls, [{ session }]);
   assert.equal(posts.length, 1);
+  const review = journal.getByRole("group", {
+    name: `Correction review ${session}`,
+  });
+  await journal.getByText("Correction review", { exact: true }).click();
+  const reviewCommands = [];
+  let rejectReview = true;
+  await page.route("**/api/paper/reviews/prepare", async (route) => {
+    reviewCommands.push(route.request().postDataJSON());
+    evidence = {
+      ...evidence,
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        correction_review: {
+          hold_history: {
+            event_count: 1,
+            events: [
+              {
+                seq: 1,
+                reason: "cumulative_quantity_decreased",
+                source: "order_observation",
+                first_observed_at: new Date().toISOString(),
+              },
+            ],
+          },
+          cases: [
+            {
+              case_id: "case-review-fixture",
+              fingerprint: "case-fingerprint",
+              preflight: {
+                state: "flat_two_passes",
+                passes: [
+                  {
+                    position_count: 0,
+                    open_order_count: 0,
+                    cash_usd: "100000",
+                    equity_usd: "100000",
+                  },
+                ],
+              },
+              observed_from: new Date().toISOString(),
+              observed_to: new Date().toISOString(),
+              stale: false,
+              decision: null,
+            },
+          ],
+        },
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await page.route("**/api/paper/reviews/record", async (route) => {
+    const body = route.request().postDataJSON();
+    reviewCommands.push(body);
+    if (rejectReview) {
+      rejectReview = false;
+      await route.fulfill({
+        status: 409,
+        json: {
+          detail: "Review evidence changed or expired; prepare a new case.",
+        },
+      });
+      return;
+    }
+    evidence = {
+      ...evidence,
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        correction_review: {
+          ...a.correction_review,
+          cases: a.correction_review.cases.map((c) => ({
+            ...c,
+            decision: {
+              disposition: body.disposition,
+              recorded_at: new Date().toISOString(),
+            },
+          })),
+        },
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await journal
+    .getByRole("button", { name: `Prepare review ${session}`, exact: true })
+    .click();
+  await journal
+    .getByText("Preflight: flat two passes", { exact: true })
+    .waitFor();
+  assert.match(await journal.textContent(), /does not clear a hold/);
+  await journal
+    .getByRole("button", { name: "Record keep blocked", exact: true })
+    .click();
+  await journal
+    .getByText("Review evidence changed or expired; prepare a new case.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(posts.length, 1);
+  console.log(
+    "PASS read-only correction preflight and stale review rejection cannot resume execution",
+  );
+  await journal
+    .getByRole("button", { name: `Prepare review ${session}`, exact: true })
+    .click();
+  await journal
+    .getByRole("button", { name: "Record provider review needed", exact: true })
+    .click();
+  await journal.getByText(/Recorded: request provider review/).waitFor();
+  assert.equal(evidence.entries_blocked, true);
+  assert.equal(posts.length, 1);
+  assert.deepEqual(reviewCommands[0], { session });
+  assert.equal(reviewCommands[3].fingerprint, "case-fingerprint");
+  assert.equal(reviewCommands[3].disposition, "request_provider_review");
+  console.log(
+    "PASS recorded review preserves the hold and exact case fingerprint",
+  );
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   assert.equal(

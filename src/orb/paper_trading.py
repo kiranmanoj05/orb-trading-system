@@ -27,6 +27,7 @@ from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
+from orb.paper_reviews import PaperReviews, ReviewConflict, TABLES as REVIEW_TABLES, install as install_reviews, capture_preflight, basis
 
 BROKER = 'https://paper-api.alpaca.markets'
 DATA = 'https://data.alpaca.markets'
@@ -113,12 +114,13 @@ class PaperEngine:
     bracket, verify terminal legs, then sell only reconciled residual quantity.
     Shutdown leaves broker exits intact. Restart requires explicit Start.
     """
-    def __init__(self, path, client=None, *, observation_clock=None):
+    def __init__(self, path, client=None, *, observation_clock=None, review_clock=None):
         self.path = Path(path)
         if self.path.is_symlink(): raise PaperError("Paper state symlinks are not supported.")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.client = client
         self.observation_clock = observation_clock or monotonic
+        self.review_clock = review_clock or (lambda: datetime.now(timezone.utc))
         self.lock = RLock()
         self.file_lock = self.thread = None
         self.quit = Event()
@@ -146,9 +148,10 @@ class PaperEngine:
             expected_tables = {'paper_meta', 'paper_attempts'}
             if version >= 2: expected_tables |= EVIDENCE_TABLES
             if version >= 3: expected_tables |= ACTIVITY_TABLES
-            if identity != 1330795600 or version not in (1, 2, 3) or tables != expected_tables:
+            if version >= 4: expected_tables |= REVIEW_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3, 4) or tables != expected_tables:
                 raise PaperError('Unrecognised paper database; no changes made.')
-            if version in (1, 2):
+            if version in (1, 2, 3):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
@@ -156,8 +159,9 @@ class PaperEngine:
                 except BlockingIOError:
                     raise PaperError('Stop the existing paper worker before upgrading its database.') from None
                 if version == 1: install_evidence(self.db)
-                install_activities(self.db)
-                self.db.execute('PRAGMA user_version=3')
+                if version <= 2: install_activities(self.db)
+                install_reviews(self.db)
+                self.db.execute('PRAGMA user_version=4')
             columns = {
                 'paper_meta': {'key', 'value'},
                 'paper_attempts': {'day', 'client_id', 'request', 'preset', 'closing', 'state'},
@@ -165,13 +169,15 @@ class PaperEngine:
                 'paper_observation_heads': {'day', 'seq', 'last_seen_at'},
                 'paper_evidence_holds': {'day', 'reason', 'observed_at'},
                 'paper_fill_activities': {'seq', 'day', 'activity_id', 'observed_at', 'fingerprint', 'payload'},
-                'paper_activity_scans': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'}}
+                'paper_activity_scans': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'},
+                'paper_hold_events': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'},
+                'paper_review_log': {'seq', 'day', 'kind', 'case_id', 'observed_at', 'fingerprint', 'payload'}}
             for table, expected in columns.items():
                 if {r[1] for r in self.db.execute(f'PRAGMA table_info({table})')} != expected:
                     raise PaperError('Unrecognised paper database columns; no changes made.')
             self.db.execute('COMMIT')
             if migration_lock: migration_lock.close()
-            self.evidence = PaperEvidence(self.db)
+            self.evidence = PaperEvidence(self.db,clock=self.review_clock)
             if self.evidence.holds():
                 self.message = 'Saved broker evidence requires review. Automatic broker actions are blocked.'
         except BaseException:
@@ -570,3 +576,25 @@ class PaperEngine:
                 self.enabled = False
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
             return self.evidence.report()
+
+
+    def prepare_review(self, day):
+        with self.lock, self.evidence_write_lease():
+            if not self.db.execute('SELECT 1 FROM paper_evidence_holds WHERE day=?',(day,)).fetchone():
+                raise ReviewConflict('No correction hold for this session.')
+            expected = basis(self.db,day)
+            scope = self.meta('account')
+            client = self.client or PaperClient()
+            started = self.review_clock()
+        preflight = capture_preflight(client,scope)
+        with self.lock, self.evidence_write_lease():
+            PaperReviews(self.db).prepare(day,expected,preflight,started.isoformat(),self.review_clock().isoformat())
+            return self.evidence.report()
+
+    def record_review(self, case_id, fingerprint, disposition):
+        with self.lock, self.evidence_write_lease():
+            PaperReviews(self.db).record(case_id,fingerprint,disposition,self.review_clock().isoformat())
+            return self.evidence.report()
+
+    def review_events(self, after=0, through=None, holds=False):
+        with self.lock: return PaperReviews(self.db).export(after,through,holds=holds)

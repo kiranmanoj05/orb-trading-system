@@ -201,7 +201,7 @@ def test_append_only_integrity_and_frozen_export_cursor(tmp_path):
 
 def test_v2_migration_preserves_observations_holds_and_rolls_back_interruption(tmp_path,monkeypatch):
     e,j,path=setup(tmp_path)
-    for table in ('paper_fill_activities','paper_activity_scans'):e.db.execute(f'DROP TABLE {table}')
+    for table in ('paper_review_log','paper_hold_events','paper_fill_activities','paper_activity_scans'):e.db.execute(f'DROP TABLE {table}')
     e.db.execute("INSERT INTO paper_evidence_holds VALUES (?,?,?)",(DAY,'original_hold',AT))
     e.db.execute('PRAGMA user_version=2');e.close()
     original=__import__('orb.paper_trading',fromlist=['install_activities']).install_activities
@@ -214,7 +214,7 @@ def test_v2_migration_preserves_observations_holds_and_rolls_back_interruption(t
     assert db.execute('SELECT COUNT(*) FROM paper_observations').fetchone()[0]==1;db.close()
     monkeypatch.setattr('orb.paper_trading.install_activities',original)
     e=PaperEngine(path)
-    assert e.db.execute('PRAGMA user_version').fetchone()[0]==3
+    assert e.db.execute('PRAGMA user_version').fetchone()[0]==4
     assert e.evidence.holds()[0]['reason']=='original_hold' and result(e)['event_count']==0;e.close()
 
 

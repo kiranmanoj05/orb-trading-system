@@ -14,6 +14,7 @@ from orb.dashboard_alpaca import connection_status, observe_paper, fetch_run, lo
 from orb.acquisition import AcquisitionError
 from orb.paper_snapshot import PaperSnapshotError
 from orb.paper_trading import PaperEngine, PaperError
+from orb.paper_reviews import ReviewConflict
 from orb.paper_evidence import EvidenceError
 from threading import Lock
 from orb.profile_runs import apply_preset
@@ -166,6 +167,38 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if not 0 <= after <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         return await run_in_threadpool(paper_engine.activity_events, after, through)
+
+    @app.get('/api/paper/reviews')
+    @app.get('/api/paper/hold-events')
+    async def paper_reviews(request: Request, after: int = 0, through: int | None = None):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        if not 0 <= after <= 1_000_000_000 or (through is not None and not 0 <= through <= 1_000_000_000):
+            raise HTTPException(422, 'Invalid evidence cursor.')
+        return await run_in_threadpool(paper_engine.review_events, after, through, request.url.path.endswith('/hold-events'))
+
+    @app.post('/api/paper/reviews/prepare')
+    async def prepare_review(request: Request):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        p = await read_json(request,1024)
+        if not isinstance(p,dict) or set(p)!={'session'} or not isinstance(p['session'],str):
+            raise HTTPException(422, 'Select an exact saved session.')
+        try:
+            day=date.fromisoformat(p['session'])
+            if str(day)!=p['session']: raise ValueError()
+        except ValueError: raise HTTPException(422, 'Select an exact saved session.') from None
+        try: return await run_in_threadpool(paper_engine.prepare_review,str(day))
+        except (ReviewConflict, PaperError, AcquisitionError) as exc: raise HTTPException(409,str(exc)) from None
+        except KeyError: raise HTTPException(404,'Review session not found.') from None
+
+    @app.post('/api/paper/reviews/record')
+    async def record_review(request: Request):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        p = await read_json(request,1024)
+        if not isinstance(p,dict) or set(p)!={'case_id','fingerprint','disposition'} or any(not isinstance(v,str) or len(v)>80 for v in p.values()):
+            raise HTTPException(422, 'Select an exact review case and supported disposition.')
+        try: return await run_in_threadpool(paper_engine.record_review,p['case_id'],p['fingerprint'],p['disposition'])
+        except (ReviewConflict,PaperError) as exc: raise HTTPException(409,str(exc)) from None
+        except KeyError: raise HTTPException(404,'Review case not found.') from None
 
     @app.post('/api/paper/evidence/refresh')
     @app.post('/api/paper/activities/refresh')

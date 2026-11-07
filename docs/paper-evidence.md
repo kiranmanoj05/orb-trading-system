@@ -1,5 +1,9 @@
 # Saved paper order evidence
 
+> Held sessions now support [correction review records](paper-correction-reviews.md).
+> Schema v4 retains later hold notices and evidence-bound preflights/decisions;
+> neither review decision clears a hold or resumes trading.
+
 > Update: [Reported fill activities](paper-fill-activities.md) supplements these
 > snapshots with read-only individual FILL history, separate quantity/price
 > comparisons and a schema-v3 journal. Fees/net P&L and reviewed hold resolution

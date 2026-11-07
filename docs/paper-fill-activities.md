@@ -1,5 +1,9 @@
 # Reported paper fill activities
 
+> [Correction review records](paper-correction-reviews.md) now preserve later hold
+> reasons and bounded preflight/decision evidence. Reviews keep holds in force;
+> fee accounting and justified resolution remain unfinished.
+
 Trades → Saved ORB attempts → **Read fill activities DATE** adds a read-only
 history view alongside saved cumulative order observations. Refresh order
 evidence first so durable entry/bracket/closing identities can be matched.

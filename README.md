@@ -17,6 +17,9 @@ persistent correction holds.
 Read-only [fill activity history](docs/paper-fill-activities.md) adds individual
 reported fills, explicit quantity mismatches and separate gross estimates;
 fees/net P&L and reviewed correction resolution remain unavailable.
+Held attempts now support [evidence-bound review records](docs/paper-correction-reviews.md)
+with read-only account preflight and append-only decisions; reviews keep holds
+and automatic actions blocked.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled
