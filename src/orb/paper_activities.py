@@ -137,7 +137,7 @@ class PaperActivities:
                 added += 1
             if scan['failure'] in ('invalid_owned_fill_activity', 'future_activity_timestamp', 'invalid_order_number', 'invalid_observation_time', 'activity_revision_in_scan'):
                 hold('invalid_owned_fill_activity')
-            scan = dict(scan, added=added)
+            scan = dict(scan, added=added,matched_versions=[dict(activity_id=e['activity_id'],fingerprint=digest(e)) for e in events])
             # Identical receipts do not consume storage. Distinct receipts are bounded.
             fingerprint = digest(scan)
             if not old_scan or old_scan['fingerprint'] != fingerprint:

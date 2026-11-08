@@ -1,5 +1,10 @@
 # Correction review records
 
+> New: [Reviewed terminal gross accounting](reviewed-terminal-accounting.md) adds
+> a narrowly validated `accept_terminal_accounting` disposition for new case-v2
+> records. It creates a separate reviewed gross estimate; all holds and execution
+> blocking remain. The original two review dispositions below are unchanged.
+
 Trades → Saved ORB attempts → **Correction review** is available for a held
 session. It prepares a bounded read-only account preflight and saves a review
 case bound to the retained evidence. The supported decisions are **Keep blocked**

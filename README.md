@@ -20,6 +20,10 @@ fees/net P&L and reviewed correction resolution remain unavailable.
 Held attempts now support [evidence-bound review records](docs/paper-correction-reviews.md)
 with read-only account preflight and append-only decisions; reviews keep holds
 and automatic actions blocked.
+Eligible price/time corrections can now receive a separate
+[reviewed terminal gross estimate](docs/reviewed-terminal-accounting.md), with
+immutable source selection and exact quantity/notional/time checks. This does
+not clear holds or establish fees, net P&L or execution permission.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

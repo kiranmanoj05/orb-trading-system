@@ -592,6 +592,110 @@ try {
   console.log(
     "PASS recorded review preserves the hold and exact case fingerprint",
   );
+  const terminalCase = {
+    ...evidence.attempts[0].correction_review.cases[0],
+    case_id: "terminal-case-fixture",
+    fingerprint: "terminal-fingerprint",
+    decision: null,
+    terminal_accounting: {
+      eligible: true,
+      reason: "terminal_price_time_evidence_agrees",
+      gross_price_pnl_usd: "30",
+      fees_usd: null,
+      net_pnl_usd: null,
+    },
+  };
+  await page.route("**/api/paper/reviews/prepare", async (route) => {
+    evidence = {
+      ...evidence,
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        correction_review: { ...a.correction_review, cases: [terminalCase] },
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  const accountingCommands = [];
+  await page.route("**/api/paper/reviews/record", async (route) => {
+    const body = route.request().postDataJSON();
+    accountingCommands.push(body);
+    assert.equal(body.disposition, "accept_terminal_accounting");
+    evidence = {
+      ...evidence,
+      attempts: evidence.attempts.map((a) => ({
+        ...a,
+        correction_review: {
+          ...a.correction_review,
+          reviewed_accounting: {
+            state: "accepted_current_basis",
+            gross_price_pnl_usd: "30",
+            accepted_at: new Date().toISOString(),
+          },
+          cases: [
+            {
+              ...terminalCase,
+              decision: {
+                disposition: body.disposition,
+                recorded_at: new Date().toISOString(),
+              },
+            },
+          ],
+        },
+      })),
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await journal
+    .getByRole("button", { name: `Prepare review ${session}`, exact: true })
+    .click();
+  const acceptGross = journal.getByRole("button", {
+    name: "Accept reviewed terminal gross",
+    exact: true,
+  });
+  await acceptGross.waitFor();
+  assert.equal(await acceptGross.isDisabled(), true);
+  await journal
+    .getByRole("checkbox", {
+      name: "I accept only this gross reconstruction; trading stays blocked.",
+      exact: true,
+    })
+    .check();
+  await acceptGross.click();
+  await journal.getByText(/Reviewed terminal gross: \$30.00/).waitFor();
+  assert.equal(evidence.entries_blocked, true);
+  assert.equal(posts.length, 1);
+  assert.equal(accountingCommands[0].fingerprint, "terminal-fingerprint");
+  await journal
+    .getByText("Closed gross estimate: Unavailable", { exact: true })
+    .waitFor();
+  console.log(
+    "PASS explicit reviewed-gross acceptance requires acknowledgement and never changes held trading/P&L eligibility",
+  );
+  evidence = {
+    ...evidence,
+    attempts: evidence.attempts.map((a) => ({
+      ...a,
+      correction_review: {
+        ...a.correction_review,
+        reviewed_accounting: {
+          ...a.correction_review.reviewed_accounting,
+          state: "superseded_by_new_evidence",
+          gross_price_pnl_usd: null,
+        },
+      },
+    })),
+  };
+  await page.reload();
+  await page.getByRole("button", { name: /^Trades/ }).click();
+  await page.getByText("Correction review", { exact: true }).click();
+  await page
+    .getByText(
+      /Reviewed terminal gross: Unavailable · superseded by new evidence/,
+    )
+    .waitFor();
+  console.log(
+    "PASS later evidence makes the reviewed-gross projection unavailable while retaining its accepted history",
+  );
   await page.getByRole("button", { name: "Close panel", exact: true }).click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   assert.equal(

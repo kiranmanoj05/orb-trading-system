@@ -11,10 +11,12 @@ export default function PaperReview({
   changed: (value: Row) => void;
 }) {
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [acknowledged, setAcknowledged] = useState("");
   async function command(kind: string, body: Row) {
     setBusy(true);
     setError("");
+    setAcknowledged("");
     try {
       const response = await fetch(`/api/paper/reviews/${kind}`, {
         method: "POST",
@@ -38,6 +40,22 @@ export default function PaperReview({
         Review records keep automatic actions blocked. A flat-account preflight
         does not clear a hold, certify reconciliation or resume trading.
       </p>
+      {review?.reviewed_accounting && (
+        <p className="warning">
+          Reviewed terminal gross:{" "}
+          {review.reviewed_accounting.gross_price_pnl_usd == null
+            ? "Unavailable"
+            : new Intl.NumberFormat("en-US", {
+                style: "currency",
+                currency: "USD",
+              }).format(
+                Number(review.reviewed_accounting.gross_price_pnl_usd),
+              )}{" "}
+          · {words(review.reviewed_accounting.state)} · accepted{" "}
+          {review.reviewed_accounting.accepted_at}. Fees/net unavailable; hold
+          remains.
+        </p>
+      )}
       <p>Hold evidence: {review?.hold_history?.event_count ?? 0} event(s)</p>
       {(review?.hold_history?.legacy_history ||
         review?.hold_history?.incomplete) && (
@@ -75,6 +93,27 @@ export default function PaperReview({
               open order(s) · cash ${p.cash_usd} · equity ${p.equity_usd}
             </small>
           ))}
+          {c.terminal_accounting && (
+            <div>
+              <p>
+                Terminal accounting:{" "}
+                {words(c.terminal_accounting.reason || "unavailable")}
+              </p>
+              {c.terminal_accounting.eligible && (
+                <p>
+                  Proposed reviewed gross:{" "}
+                  {new Intl.NumberFormat("en-US", {
+                    style: "currency",
+                    currency: "USD",
+                  }).format(
+                    Number(c.terminal_accounting.gross_price_pnl_usd),
+                  )}{" "}
+                  · fees/net unavailable. Exact retained order/activity
+                  quantities and notionals agree.
+                </p>
+              )}
+            </div>
+          )}
           {c.decision ? (
             <p>
               Recorded: {words(c.decision.disposition)} ·{" "}
@@ -82,6 +121,34 @@ export default function PaperReview({
             </p>
           ) : (
             <>
+              {c.terminal_accounting?.eligible && (
+                <>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={acknowledged === c.case_id}
+                      onChange={(e) =>
+                        setAcknowledged(e.target.checked ? c.case_id : "")
+                      }
+                      disabled={busy || c.stale}
+                    />
+                    I accept only this gross reconstruction; trading stays
+                    blocked.
+                  </label>
+                  <button
+                    disabled={busy || c.stale || acknowledged !== c.case_id}
+                    onClick={() =>
+                      command("record", {
+                        case_id: c.case_id,
+                        fingerprint: c.fingerprint,
+                        disposition: "accept_terminal_accounting",
+                      })
+                    }
+                  >
+                    Accept reviewed terminal gross
+                  </button>
+                </>
+              )}
               <button
                 disabled={busy || c.stale}
                 onClick={() =>

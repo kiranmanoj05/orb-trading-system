@@ -8,7 +8,7 @@ from orb.paper_evidence import EvidenceError, digest, encoded, numeric, stamp, v
 TABLES = {'paper_hold_events', 'paper_review_log'}
 MAX_HOLDS = 10000
 MAX_REVIEWS = 2000
-DISPOSITIONS = {'keep_blocked', 'request_provider_review'}
+DISPOSITIONS = {'keep_blocked', 'request_provider_review', 'accept_terminal_accounting'}
 
 
 class ReviewConflict(ValueError):
@@ -75,6 +75,7 @@ def capture_preflight(client, expected_scope):
             if sha256(a['id'].encode()).hexdigest() != expected_scope:
                 return dict(state='account_scope_mismatch',passes=passes)
             flags = [a.get('status')=='ACTIVE',a.get('trading_blocked') is False,a.get('account_blocked') is False]
+            if a.get('currency') != 'USD': return dict(state='account_currency_unverified',passes=passes)
             cash,equity = numeric(a.get('cash')),numeric(a.get('equity'))
             positions = client.request('GET','/v2/positions')
             orders = client.request('GET','/v2/orders?status=open&limit=500&nested=false')
@@ -115,10 +116,12 @@ class PaperReviews:
             if not self.db.execute('SELECT 1 FROM paper_evidence_holds WHERE day=?',(day,)).fetchone():
                 raise ReviewConflict('No correction hold for this session.')
             current=basis(self.db,day)
-            value=dict(schema_version='orb-paper-review-case-v1',session=day,basis=expected_basis,
+            from orb.terminal_accounting import assess
+            assessment = assess(self.db,day,preflight,started,at) if current==expected_basis else dict(eligible=False,reason='basis_changed_during_preflight')
+            value=dict(schema_version='orb-paper-review-case-v2',session=day,basis=expected_basis,
                        stale_on_arrival=current!=expected_basis,preflight=preflight,
                        observed_from=started,observed_to=at,hold_history=self.hold_history(day),
-                       authority='review_only_holds_remain',fees_usd=None,net_pnl_usd=None)
+                       authority='review_only_holds_remain',fees_usd=None,net_pnl_usd=None,terminal_accounting=assessment)
             case_id=digest(value)
             self._append(day,'case',case_id,value,at)
             self.db.execute('COMMIT')
@@ -159,7 +162,13 @@ class PaperReviews:
                 if case['decision']['disposition']!=disposition:raise ReviewConflict('This case already has a different recorded decision.')
                 self.db.execute('COMMIT');return case
             if case['stale']:raise ReviewConflict('Review evidence changed or expired; prepare a new case.')
-            value=dict(schema_version='orb-paper-review-decision-v1',case_id=case_id,case_fingerprint=expected_fingerprint,
+            if disposition=='accept_terminal_accounting':
+                if not case.get('terminal_accounting',{}).get('eligible'):
+                    raise ReviewConflict('This case does not support terminal accounting; refresh evidence and prepare a new case.')
+                accounting=dict(schema_version='orb-reviewed-terminal-accounting-v1',case_id=case_id,case_fingerprint=expected_fingerprint,
+                    basis=case['basis'],accepted_at=now,assessment=case['terminal_accounting'],authority='accounting_only_holds_remain')
+                self._append(case['session'],'accounting',case_id,accounting,now)
+            value=dict(schema_version='orb-paper-review-decision-v2',case_id=case_id,case_fingerprint=expected_fingerprint,
                        disposition=disposition,recorded_at=now,authority='review_only_holds_remain')
             self._append(case['session'],'decision',case_id,value,now)
             self.db.execute('COMMIT');return self.case(case_id,now)
@@ -169,7 +178,15 @@ class PaperReviews:
 
     def report(self,day,now):
         rows=list(self.db.execute("SELECT case_id FROM paper_review_log WHERE day=? AND kind='case' ORDER BY seq DESC LIMIT 6",(day,)))
-        return dict(hold_history=self.hold_history(day),cases=[self.case(r['case_id'],now) for r in rows[:5]],
+        accounting_row=self.db.execute("SELECT * FROM paper_review_log WHERE day=? AND kind='accounting' ORDER BY seq DESC LIMIT 1",(day,)).fetchone()
+        accounting=None
+        if accounting_row:
+            value=verified(accounting_row)
+            current=value['basis']==basis(self.db,day)
+            accounting=dict(state='accepted_current_basis' if current else 'superseded_by_new_evidence',case_id=value['case_id'],
+                accepted_at=value['accepted_at'],gross_price_pnl_usd=value['assessment']['gross_price_pnl_usd'] if current else None,
+                fees_usd=None,net_pnl_usd=None,authority='accounting_only_holds_remain')
+        return dict(reviewed_accounting=accounting,hold_history=self.hold_history(day),cases=[self.case(r['case_id'],now) for r in rows[:5]],
                     cases_truncated=len(rows)>5,authority='review_only_holds_remain')
 
     def export(self,after=0,through=None,*,holds=False):
