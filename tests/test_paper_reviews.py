@@ -18,7 +18,7 @@ AT=(NOW+timedelta(minutes=1)).isoformat()
 
 
 class ReadOnly(Broker):
-    def __init__(self):super().__init__();self.reads=[];self.account_reads=0;self.change=False
+    def __init__(self):super().__init__();self.account['currency']='USD';self.reads=[];self.account_reads=0;self.change=False
     def request(self,method,path,payload=None,**kw):
         assert method=='GET'
         self.reads.append(path)
