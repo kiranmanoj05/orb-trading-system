@@ -27,6 +27,7 @@ from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
+from orb.paper_fees import PaperFees, TABLES as FEE_TABLES, install as install_fees, fetch as fetch_fees, window as fee_window
 from orb.paper_reviews import PaperReviews, ReviewConflict, TABLES as REVIEW_TABLES, install as install_reviews, capture_preflight, basis
 
 BROKER = 'https://paper-api.alpaca.markets'
@@ -149,9 +150,10 @@ class PaperEngine:
             if version >= 2: expected_tables |= EVIDENCE_TABLES
             if version >= 3: expected_tables |= ACTIVITY_TABLES
             if version >= 4: expected_tables |= REVIEW_TABLES
-            if identity != 1330795600 or version not in (1, 2, 3, 4) or tables != expected_tables:
+            if version >= 5: expected_tables |= FEE_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3, 4, 5) or tables != expected_tables:
                 raise PaperError('Unrecognised paper database; no changes made.')
-            if version in (1, 2, 3):
+            if version in (1, 2, 3, 4):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
@@ -160,9 +162,11 @@ class PaperEngine:
                     raise PaperError('Stop the existing paper worker before upgrading its database.') from None
                 if version == 1: install_evidence(self.db)
                 if version <= 2: install_activities(self.db)
-                install_reviews(self.db)
-                self.db.execute('PRAGMA user_version=4')
+                if version <= 3: install_reviews(self.db)
+                install_fees(self.db)
+                self.db.execute('PRAGMA user_version=5')
             columns = {
+                'paper_fee_log': {'seq','day','kind','activity_id','observed_at','fingerprint','payload'},
                 'paper_meta': {'key', 'value'},
                 'paper_attempts': {'day', 'client_id', 'request', 'preset', 'closing', 'state'},
                 'paper_observations': {'seq', 'day', 'observed_at', 'fingerprint', 'payload'},
@@ -575,6 +579,41 @@ class PaperEngine:
             if self.evidence.holds():
                 self.enabled = False
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
+            return self.evidence.report()
+
+
+    def fee_events(self, after=0, through=None):
+        with self.lock: return PaperFees(self.db).export(after, through)
+
+    def refresh_fees(self, day):
+        """Read account FEE records without management/order capabilities."""
+        now = self.review_clock()
+        try: after, until = fee_window(day, now)
+        except (ValueError, TypeError):
+            raise PaperError('Choose a posting date within the past 90 days.') from None
+        with self.lock, self.evidence_write_lease():
+            expected = self.meta('account')
+            if expected is None and self.db.execute('SELECT 1 FROM paper_attempts').fetchone():
+                raise PaperError('Missing saved paper account scope; preserve the database.')
+            client = self.client or PaperClient()
+        try: account = client.request('GET', '/v2/account')
+        except Exception: raise PaperError('Paper account read failed.') from None
+        if (not isinstance(account, dict) or not isinstance(account.get('id'), str)
+                or not 1 <= len(account['id']) <= 256 or account.get('currency') != 'USD'):
+            raise PaperError('Explicit USD paper account-scope evidence is required.')
+        scope = sha256(account['id'].encode()).hexdigest()
+        if expected is not None and scope != expected:
+            raise PaperError('Database belongs to a different paper account.')
+        events, scan = fetch_fees(client, after, until)
+        with self.lock, self.evidence_write_lease():
+            if self.meta('account') not in (None, scope):
+                raise PaperError('Paper account scope changed during fee read.')
+            try: PaperFees(self.db).save(day, events, scan, self.review_clock().isoformat(), scope)
+            except EvidenceError as exc:
+                if str(exc) in ('stale_fee_scan', 'fee_account_scope_changed'):
+                    raise PaperError('A newer fee scan or account scope was saved; refresh again.') from None
+                raise
+            if self.evidence.holds(): self.enabled = False
             return self.evidence.report()
 
 

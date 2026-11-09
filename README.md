@@ -24,6 +24,10 @@ Eligible price/time corrections can now receive a separate
 [reviewed terminal gross estimate](docs/reviewed-terminal-accounting.md), with
 immutable source selection and exact quantity/notional/time checks. This does
 not clear holds or establish fees, net P&L or execution permission.
+Read-only [account fee evidence](docs/paper-account-fees.md) now retains signed
+FEE records, scan receipts and revisions, with explicit unknown attribution and
+sticky account correction gates. These records do not establish per-trade costs
+or net profit.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

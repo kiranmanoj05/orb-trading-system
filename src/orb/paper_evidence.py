@@ -177,7 +177,9 @@ class PaperEvidence:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def holds(self):
-        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')]
+        from orb.paper_fees import PaperFees
+        fee_hold = PaperFees(self.db).hold()
+        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')] + ([fee_hold] if fee_hold else [])
 
     def _hold(self, day, reason, at):
         from orb.paper_reviews import record_hold
@@ -289,6 +291,7 @@ class PaperEvidence:
                 orders=payload['orders'] if payload else [],
                 fill_activities=activities.report(row['day'], payload['orders'] if payload else [], outcome, row['day'] in holds),
                 correction_review=reviews.report(row['day'],self.clock().isoformat()) if row['day'] in holds else None))
-        return dict(schema_version='orb-paper-evidence-report-v1', attempts=attempts, orders=orders,
+        from orb.paper_fees import PaperFees
+        return dict(schema_version='orb-paper-evidence-report-v1', attempts=attempts, orders=orders, account_fees=PaperFees(self.db).report(),
                     holds=list(holds.values()), entries_blocked=bool(holds), attempts_may_be_truncated=len(rows) > 100,
                     notice='Saved ORB-owned cumulative snapshots. Closed gross price P&L is an estimate from broker averages; fees/net P&L unavailable. No account-wide reconciliation or execution-event completeness is implied.')

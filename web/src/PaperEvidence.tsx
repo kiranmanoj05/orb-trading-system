@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import PaperReview from "./PaperReview";
+import PaperFees from "./PaperFees";
 type Row = Record<string, any>;
 const amount = (v: any) =>
   v == null
@@ -135,12 +136,37 @@ export default function PaperEvidence({
             throw new Error(
               "Hold export exceeded its bound; no partial download was created.",
             );
+          const fees: Row[] = [];
+          let feeAfter = 0,
+            feeThrough: number | undefined,
+            feeFinished = false;
+          for (let p = 0; p < 120; p++) {
+            const response = await fetch(
+              `/api/paper/fees?after=${feeAfter}${feeThrough === undefined ? "" : `&through=${feeThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Fee export failed.");
+            feeThrough ??= history.through;
+            fees.push(...history.events);
+            if (!history.has_more) {
+              feeFinished = true;
+              break;
+            }
+            if (history.next_after <= feeAfter)
+              throw new Error("Fee cursor did not advance.");
+            feeAfter = history.next_after;
+          }
+          if (!feeFinished)
+            throw new Error(
+              "Fee export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v3",
+                    schema_version: "orb-paper-evidence-download-v4",
                     report,
                     through,
                     observations,
@@ -148,10 +174,12 @@ export default function PaperEvidence({
                     activities_through: fillThrough,
                     correction_reviews: reviews,
                     reviews_through: reviewThrough,
+                    account_fee_evidence: fees,
+                    fees_through: feeThrough,
                     hold_events: holds,
                     holds_through: holdThrough,
                     notice:
-                      "Order observations, FILL activities and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
+                      "Order observations, FILL activities, unattributed account FEE records and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,
@@ -216,7 +244,7 @@ export default function PaperEvidence({
             shares
           </small>
           <span>Closed gross estimate: {amount(a.gross_price_pnl_usd)}</span>
-          <small>Net P&L: Unavailable · fees not captured</small>
+          <small>Net P&L: Unavailable · per-trade fees unavailable</small>
           <small>Last observed: {a.observed_at || "not observed"}</small>
           {a.hold_reason && (
             <p className="warning">Review required: {words(a.hold_reason)}</p>
@@ -298,10 +326,8 @@ export default function PaperEvidence({
           </details>
         </article>
       ))}
-      <button
-        disabled={!!busy || !report?.attempts?.length}
-        onClick={exportHistory}
-      >
+      <PaperFees fees={report?.account_fees} changed={changed} />
+      <button disabled={!!busy || !report} onClick={exportHistory}>
         Export saved paper evidence
       </button>
       {error && (

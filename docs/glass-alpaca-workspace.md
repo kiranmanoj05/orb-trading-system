@@ -68,3 +68,12 @@ exported from actual engine evaluation; no real credentials/provider calls are
 available in this runtime. Real-account access, actual Mac SIP reproduction and
 Mac rendering require the user's local runtime and data. The hosted design study
 remains a separate sample-data site; this change concerns the local GitHub app.
+
+## Account fee records (9 November 2026)
+
+The existing Trades drawer now contains an optional account fee panel and includes
+fee versions/scan receipts in the saved-evidence export. It preserves Workspace /
+Settings navigation, appearance/media handling and the opaque candle surface.
+The panel is read-only, uses an explicit posting-window anchor and distinguishes
+signed cash, partial reads and unavailable per-trade costs. See
+[account fee evidence](paper-account-fees.md). Presets/settings are unchanged.

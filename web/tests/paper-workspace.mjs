@@ -389,10 +389,12 @@ try {
     });
   });
   const reviewExports = [],
-    holdExports = [];
+    holdExports = [],
+    feeExports = [];
   for (const [path, calls] of [
     ["reviews", reviewExports],
     ["hold-events", holdExports],
+    ["fees", feeExports],
   ]) {
     await page.route(`**/api/paper/${path}?*`, async (route) => {
       const u = new URL(route.request().url()),
@@ -428,6 +430,16 @@ try {
     { after: "0" },
     { after: "10", through: "11" },
   ]);
+  assert.deepEqual(
+    exported.account_fee_evidence.map((r) => r.seq),
+    [20, 21],
+  );
+  assert.deepEqual(feeExports, [
+    { after: "0" },
+    { after: "20", through: "21" },
+  ]);
+  assert.equal(exported.fees_through, 21);
+  assert.equal(exported.schema_version, "orb-paper-evidence-download-v4");
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
   assert.deepEqual(
@@ -448,6 +460,67 @@ try {
   ]);
   console.log(
     "PASS snapshot and individual fill exports use separate frozen cursors and retain unavailable fees/net",
+  );
+  const feeCalls = [];
+  await page.route("**/api/paper/fees/refresh", async (route) => {
+    feeCalls.push(route.request().postDataJSON());
+    const second = feeCalls.length > 1;
+    evidence = {
+      ...evidence,
+      account_fees: {
+        state: second ? "scan_incomplete" : "observed_usd_cash_only",
+        observed_signed_usd_cash: second ? null : "-1.25",
+        trade_net_pnl_usd: null,
+        scan: {
+          after: "2026-11-01T04:00:00+00:00",
+          until: "2026-11-02T15:00:00+00:00",
+          observed_at: "2026-11-02T15:00:01+00:00",
+          scan_finished: !second,
+          failure: second ? "fee_read_failed" : null,
+        },
+        events: [
+          {
+            seq: 1,
+            signed_cash_amount: "-1.25",
+            currency: "USD",
+            status: "executed",
+            activity_date: "2026-11-02",
+            created_at: "2026-11-02T14:00:00+00:00",
+            first_observed_at: "2026-11-02T15:00:01+00:00",
+          },
+        ],
+      },
+    };
+    await route.fulfill({ json: evidence });
+  });
+  await journal
+    .getByText("Account fee records · not observed", { exact: true })
+    .click();
+  await journal
+    .getByLabel("Posting window anchor (New York date)")
+    .fill("2026-11-02");
+  await journal
+    .getByRole("button", { name: "Read account fees", exact: true })
+    .click();
+  await journal
+    .getByText("Observed signed USD cash: -1.25 USD", { exact: true })
+    .waitFor();
+  assert.deepEqual(feeCalls, [{ session: "2026-11-02" }]);
+  assert(await journal.getByText(/unattributed to trades/).isVisible());
+  console.log(
+    "PASS account fee read uses explicit date, signed cash and unattributed labels without changing presets or submitting",
+  );
+  await journal
+    .getByRole("button", { name: "Read account fees", exact: true })
+    .click();
+  await journal
+    .getByText("Observed signed USD cash: Unavailable", { exact: true })
+    .waitFor();
+  await journal
+    .getByText("Account fee records · scan incomplete", { exact: true })
+    .waitFor();
+  console.log(
+    "PASS incomplete account fee scan hides cash total and preserves per-trade net as unavailable",
   );
   const refreshCalls = [];
   await page.route("**/api/paper/evidence/refresh", async (route) => {
