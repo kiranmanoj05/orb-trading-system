@@ -163,18 +163,18 @@ def test_preflight_timing_is_explicit(tmp_path,offset,state):
 
 def test_schema3_migration_backfills_only_honest_legacy_reason(tmp_path):
     e,j,path=setup(tmp_path)
-    for table in ('paper_review_log','paper_hold_events'):e.db.execute(f'DROP TABLE {table}')
+    for table in ('paper_fee_log','paper_review_log','paper_hold_events'):e.db.execute(f'DROP TABLE {table}')
     e.db.execute('PRAGMA user_version=3');e.close();e=PaperEngine(path)
     h=PaperReviews(e.db).hold_history(DAY)
     assert h['legacy_history'] and h['event_count']==1
     assert h['events'][0]['source']=='legacy_first_reason_only'
-    assert e.db.execute('PRAGMA user_version').fetchone()[0]==4;e.close()
+    assert e.db.execute('PRAGMA user_version').fetchone()[0]==5;e.close()
 
 
 def test_migration_failure_rolls_back_and_active_old_worker_refuses_upgrade(tmp_path,monkeypatch):
     import fcntl
     e,j,path=setup(tmp_path)
-    for table in ('paper_review_log','paper_hold_events'):e.db.execute(f'DROP TABLE {table}')
+    for table in ('paper_fee_log','paper_review_log','paper_hold_events'):e.db.execute(f'DROP TABLE {table}')
     e.db.execute('PRAGMA user_version=3');e.close()
     with path.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)

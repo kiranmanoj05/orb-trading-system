@@ -58,7 +58,9 @@ def basis(db, day):
         marks[table] = [(r['seq'],r['fingerprint']) for r in rows]
     holds = [dict(r) for r in db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')]
     meta = [tuple(r) for r in db.execute('SELECT * FROM paper_meta ORDER BY key')]
-    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta))
+    from orb.paper_fees import PaperFees
+    fees = PaperFees(db).commitment()
+    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees))
 
 
 def capture_preflight(client, expected_scope):

@@ -168,6 +168,13 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         return await run_in_threadpool(paper_engine.activity_events, after, through)
 
+    @app.get('/api/paper/fees')
+    async def paper_fees(after: int = 0, through: int | None = None):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        if not 0 <= after <= 1_000_000_000 or (through is not None and not 0 <= through <= 1_000_000_000):
+            raise HTTPException(422, 'Invalid evidence cursor.')
+        return await run_in_threadpool(paper_engine.fee_events, after, through)
+
     @app.get('/api/paper/reviews')
     @app.get('/api/paper/hold-events')
     async def paper_reviews(request: Request, after: int = 0, through: int | None = None):
@@ -202,6 +209,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
 
     @app.post('/api/paper/evidence/refresh')
     @app.post('/api/paper/activities/refresh')
+    @app.post('/api/paper/fees/refresh')
     async def refresh_paper_evidence(request: Request):
         if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
         p = await read_json(request, 1024)
@@ -213,6 +221,7 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         except ValueError: raise HTTPException(422, 'Select an exact saved session.') from None
         try:
             method = paper_engine.refresh_activities if request.url.path.endswith('/activities/refresh') else paper_engine.refresh_evidence
+            if request.url.path.endswith('/fees/refresh'): method = paper_engine.refresh_fees
             return await run_in_threadpool(method, str(day))
         except KeyError: raise HTTPException(404, 'No saved ORB attempt for this session.') from None
         except (PaperError, AcquisitionError) as exc: raise HTTPException(409, str(exc)) from None
