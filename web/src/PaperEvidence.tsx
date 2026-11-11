@@ -161,12 +161,37 @@ export default function PaperEvidence({
             throw new Error(
               "Fee export exceeded its bound; no partial download was created.",
             );
+          const admissions: Row[] = [];
+          let admissionAfter = 0,
+            admissionThrough: number | undefined,
+            admissionFinished = false;
+          for (let p = 0; p < 120; p++) {
+            const response = await fetch(
+              `/api/paper/admissions?after=${admissionAfter}${admissionThrough === undefined ? "" : `&through=${admissionThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Admission export failed.");
+            admissionThrough ??= history.through;
+            admissions.push(...history.events);
+            if (!history.has_more) {
+              admissionFinished = true;
+              break;
+            }
+            if (history.next_after <= admissionAfter)
+              throw new Error("Admission cursor did not advance.");
+            admissionAfter = history.next_after;
+          }
+          if (!admissionFinished)
+            throw new Error(
+              "Admission export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v4",
+                    schema_version: "orb-paper-evidence-download-v5",
                     report,
                     through,
                     observations,
@@ -174,12 +199,14 @@ export default function PaperEvidence({
                     activities_through: fillThrough,
                     correction_reviews: reviews,
                     reviews_through: reviewThrough,
+                    admission_history: admissions,
+                    admissions_through: admissionThrough,
                     account_fee_evidence: fees,
                     fees_through: feeThrough,
                     hold_events: holds,
                     holds_through: holdThrough,
                     notice:
-                      "Order observations, FILL activities, unattributed account FEE records and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
+                      "Order observations, FILL activities, unattributed account FEE records, planned admission/release records and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,

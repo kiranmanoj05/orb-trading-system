@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import PaperAdmission from "./PaperAdmission";
 type Row = Record<string, any>;
 export default function PaperControls({
   status,
@@ -131,6 +132,7 @@ export default function PaperControls({
           apply only after stopping and starting with a saved version.
         </p>
       )}
+      <PaperAdmission admission={status?.admission} />
       <details>
         <summary>Operation & limits</summary>
         <p className="drawer-note">

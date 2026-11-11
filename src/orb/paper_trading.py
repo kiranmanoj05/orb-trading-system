@@ -27,6 +27,7 @@ from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
+from orb.paper_admission import PaperAdmission, TABLES as ADMISSION_TABLES, install as install_admission
 from orb.paper_fees import PaperFees, TABLES as FEE_TABLES, install as install_fees, fetch as fetch_fees, window as fee_window
 from orb.paper_reviews import PaperReviews, ReviewConflict, TABLES as REVIEW_TABLES, install as install_reviews, capture_preflight, basis
 
@@ -151,9 +152,10 @@ class PaperEngine:
             if version >= 3: expected_tables |= ACTIVITY_TABLES
             if version >= 4: expected_tables |= REVIEW_TABLES
             if version >= 5: expected_tables |= FEE_TABLES
-            if identity != 1330795600 or version not in (1, 2, 3, 4, 5) or tables != expected_tables:
+            if version >= 6: expected_tables |= ADMISSION_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3, 4, 5, 6) or tables != expected_tables:
                 raise PaperError('Unrecognised paper database; no changes made.')
-            if version in (1, 2, 3, 4):
+            if version in (1, 2, 3, 4, 5):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
@@ -163,9 +165,11 @@ class PaperEngine:
                 if version == 1: install_evidence(self.db)
                 if version <= 2: install_activities(self.db)
                 if version <= 3: install_reviews(self.db)
-                install_fees(self.db)
-                self.db.execute('PRAGMA user_version=5')
+                if version <= 4: install_fees(self.db)
+                install_admission(self.db)
+                self.db.execute('PRAGMA user_version=6')
             columns = {
+                'paper_admission_log': {'seq','day','observed_at','fingerprint','payload'},
                 'paper_fee_log': {'seq','day','kind','activity_id','observed_at','fingerprint','payload'},
                 'paper_meta': {'key', 'value'},
                 'paper_attempts': {'day', 'client_id', 'request', 'preset', 'closing', 'state'},
@@ -198,7 +202,7 @@ class PaperEngine:
         with self.lock:
             return dict(enabled=self.enabled, environment='paper', symbol='SPY', feed=self.feed,
                         message=self.message, updated_at=self.updated_at, preset=self.record, market=self.market,
-                        evidence=self.evidence.report(),
+                        evidence=self.evidence.report(), admission=PaperAdmission(self.db).report(),
                         attempts=[dict(r) | {'request': json.loads(r['request']), 'preset': json.loads(r['preset'])}
                                   for r in self.db.execute('SELECT * FROM paper_attempts ORDER BY day DESC LIMIT 20')])
 
@@ -219,6 +223,7 @@ class PaperEngine:
         settings = self.validate(record, feed)
         with self.lock:
             if self.enabled: raise PaperError('Paper worker already running; stop before changing settings.')
+            PaperAdmission(self.db).report()
             if self.evidence.report()['entries_blocked']: raise PaperError('Saved broker evidence has a correction hold. Inspect Alpaca; automatic restart is blocked.')
             if self.thread and self.thread.is_alive():
                 # Existing management thread can rearm without spawning a competitor.
@@ -283,6 +288,7 @@ class PaperEngine:
     def tick(self, now):
         started = monotonic()
         self.updated_at = now.isoformat()
+        PaperAdmission(self.db).report()
         if self.evidence.report()['entries_blocked']:
             raise PaperError('Saved broker evidence has a correction hold. Automatic broker actions are blocked; inspect Alpaca.')
         clock = self.client.request('GET', '/v2/clock')
@@ -292,7 +298,8 @@ class PaperEngine:
         scope = sha256(account['id'].encode()).hexdigest()
         saved = self.meta('account')
         if saved and saved != scope: raise PaperError('Database belongs to a different paper account.')
-        self.meta('account', scope)
+        if saved is None and self.db.execute('SELECT 1 FROM paper_attempts').fetchone():
+            raise PaperError('Missing saved paper account scope; preserve the database.')
         today = now.astimezone(NEW_YORK).date()
         session = exchange_session(today)
         for row in list(self.db.execute("SELECT * FROM paper_attempts WHERE state != 'done'")):
@@ -326,16 +333,8 @@ class PaperEngine:
             return
         equity, cash = decimal(account['equity']), decimal(account['cash'])
         allocation = min(self.settings.initial_cash, equity, cash)
-        anchor_key = 'equity:' + str(today)
-        anchor = decimal(self.meta(anchor_key) or self.meta(anchor_key, str(equity)))
-        budget_key = 'loss-budget:' + str(today)
-        requested_budget = min(anchor, self.settings.initial_cash) * self.settings.daily_loss_fraction
-        budget = min(decimal(self.meta(budget_key) or str(requested_budget)), requested_budget)
-        self.meta(budget_key, str(budget))
-        loss_key = 'loss-blocked:' + str(today)
-        if equity <= anchor - budget:
-            self.meta(loss_key, 'yes')
-        if self.meta(loss_key):
+        loss = PaperAdmission(self.db).checkpoint(str(today),self.settings,equity,scope)
+        if loss['daily_loss_blocked']:
             self.message = 'Daily loss threshold reached. New entries blocked.'
             return
         bars = self.update_market(session, now)
@@ -387,8 +386,11 @@ class PaperEngine:
                 or decision_at - signal.observed_at > timedelta(seconds=90)):
             raise PaperError('Entry evidence expired during requests; no order submitted.')
         if self.quit.is_set() or not self.enabled: return
-        self.db.execute('INSERT INTO paper_attempts VALUES (?,?,?,?,?,?)',
-                        (str(today), client_id, json.dumps(payload), json.dumps(self.record), None, 'reserved'))
+        admission = PaperAdmission(self.db).reserve(str(today),client_id,payload,self.record,self.settings,scope,
+            equity,cash,decision_at.isoformat(),self.feed)
+        if not admission['accepted']:
+            self.message = 'Daily loss threshold reached. New entries blocked.'
+            return
         self.client.request('POST', '/v2/orders', payload)
         self.message = f'Paper bracket submitted: {sized.quantity} SPY; planned stop risk ${sized.quantity * (entry-stop):.2f}.'
 
@@ -418,7 +420,8 @@ class PaperEngine:
         parent = self.client.order(parent['id'])
         close_request = json.loads(row['closing']) if row['closing'] else None
         close_order = self.client.find(close_request['client_order_id']) if close_request else None
-        self.capture_evidence(row, parent, close_order, now + timedelta(seconds=self.observation_clock() - started))
+        observed_at = now + timedelta(seconds=self.observation_clock() - started)
+        self.capture_evidence(row, parent, close_order, observed_at)
         expected = json.loads(row['request'])
         if (parent.get('client_order_id') != row['client_id'] or parent.get('symbol') != 'SPY'
                 or parent.get('side') != 'buy' or decimal(parent.get('qty')) != decimal(expected['qty'])
@@ -457,7 +460,7 @@ class PaperEngine:
             raise PaperError('Closing order ended with remaining ORB quantity; inspect Alpaca. No automatic resubmission.')
         terminal = parent['status'] in TERMINAL and all(o['status'] in TERMINAL for o in legs)
         if terminal and residual == 0 and (close_order is None or close_order['status'] in TERMINAL):
-            self.db.execute("UPDATE paper_attempts SET state='done' WHERE day=?", (row['day'],))
+            PaperAdmission(self.db).finish(row['day'],observed_at.isoformat())
             self.message = 'Paper attempt complete; broker reports no remaining ORB quantity.'
             return True
         day_session = exchange_session(datetime.fromisoformat(row['day']).date())
@@ -581,6 +584,9 @@ class PaperEngine:
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
             return self.evidence.report()
 
+
+    def admission_events(self, after=0, through=None):
+        with self.lock: return PaperAdmission(self.db).export(after,through)
 
     def fee_events(self, after=0, through=None):
         with self.lock: return PaperFees(self.db).export(after, through)

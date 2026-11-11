@@ -28,6 +28,10 @@ Read-only [account fee evidence](docs/paper-account-fees.md) now retains signed
 FEE records, scan receipts and revisions, with explicit unknown attribution and
 sticky account correction gates. These records do not establish per-trade costs
 or net profit.
+The native paper worker now [atomically reserves entry risk](docs/atomic-paper-admission.md)
+with its saved intent, and releases headroom with terminal quantity evidence.
+Pending/partial attempts retain full planned headroom; this is separate from
+broker cash, net P&L and account-wide recovery clearance.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

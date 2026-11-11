@@ -76,6 +76,19 @@ try {
     entries_blocked: false,
   };
   const state = () => ({
+    admission: {
+      active_count: 1,
+      session_attempt_count: 1,
+      session: "2026-11-02",
+      cash_headroom_usd: "1000",
+      exposure_headroom_usd: "1000",
+      planned_stop_risk_usd: "10",
+      anchor_equity_usd: "100000",
+      loss_budget_usd: "1500",
+      daily_loss_blocked: false,
+      active_reservations: [],
+      legacy_pending_sessions: [],
+    },
     evidence,
     available: true,
     enabled: running,
@@ -233,6 +246,26 @@ try {
     .waitFor();
   assert.equal(running, false);
   console.log("PASS Start freezes preset identity and Stop blocks new entries");
+  await page.getByText("Saved entry risk", { exact: true }).click();
+  await page
+    .getByText("Pending reservations: 1 · session attempts: 1 (2026-11-02)", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByText(
+      "Cash headroom: 1000 USD · exposure headroom: 1000 USD · planned stop risk: 10 USD",
+      { exact: true },
+    )
+    .waitFor();
+  assert(
+    await page
+      .getByText(/Planned admission headroom, not broker cash/)
+      .isVisible(),
+  );
+  console.log(
+    "PASS saved admission risk distinguishes planned cash/exposure/risk and consumed caps from broker balances",
+  );
   const session = source.evidence.coverage[0].session;
   const ownedOrders = [
     orders[0],
@@ -390,11 +423,13 @@ try {
   });
   const reviewExports = [],
     holdExports = [],
-    feeExports = [];
+    feeExports = [],
+    admissionExports = [];
   for (const [path, calls] of [
     ["reviews", reviewExports],
     ["hold-events", holdExports],
     ["fees", feeExports],
+    ["admissions", admissionExports],
   ]) {
     await page.route(`**/api/paper/${path}?*`, async (route) => {
       const u = new URL(route.request().url()),
@@ -438,8 +473,17 @@ try {
     { after: "0" },
     { after: "20", through: "21" },
   ]);
+  assert.deepEqual(
+    exported.admission_history.map((r) => r.seq),
+    [20, 21],
+  );
+  assert.deepEqual(admissionExports, [
+    { after: "0" },
+    { after: "20", through: "21" },
+  ]);
+  assert.equal(exported.admissions_through, 21);
   assert.equal(exported.fees_through, 21);
-  assert.equal(exported.schema_version, "orb-paper-evidence-download-v4");
+  assert.equal(exported.schema_version, "orb-paper-evidence-download-v5");
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
   assert.deepEqual(
