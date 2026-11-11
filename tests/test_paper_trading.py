@@ -131,10 +131,12 @@ def test_invalid_or_external_evidence_never_submits(tmp_path,change):
 
 def test_day_attempt_remains_consumed_after_target_and_preset_change(tmp_path):
     e,b=engine(tmp_path);e.tick(NOW)
-    b.parent.update(status='filled',filled_qty='10')
-    b.parent['legs']=[dict(symbol='SPY',side='sell',id='tp',status='filled',filled_qty='10'), dict(symbol='SPY',side='sell',id='sl',status='canceled',filled_qty='0')]
+    quantity=b.parent['qty']
+    b.parent.update(status='filled',filled_qty=quantity)
+    b.parent['legs']=[dict(symbol='SPY',side='sell',id='tp',status='filled',filled_qty=quantity), dict(symbol='SPY',side='sell',id='sl',status='canceled',filled_qty='0')]
     e.record=PresetStore.paper('paper-active')
-    e.tick(NOW)
+    b.clock['timestamp']=(NOW+timedelta(seconds=1)).isoformat()
+    e.tick(NOW+timedelta(seconds=1))
     assert len(b.posts)==1 and e.status()['attempts'][0]['state']=='done'
     e.close()
 
@@ -162,7 +164,8 @@ def test_partial_fill_cancellation_confirmed_before_residual_close(tmp_path):
     e.tick(NOW)
     assert len(b.posts)==2
     b.closing.update(status='filled',filled_qty='4');b.positions=[]
-    e.tick(NOW)
+    b.clock['timestamp']=(NOW+timedelta(seconds=1)).isoformat()
+    e.tick(NOW+timedelta(seconds=1))
     assert e.status()['attempts'][0]['state']=='done'
     e.close()
 
@@ -420,7 +423,7 @@ def test_daily_loss_block_survives_equity_recovery_restart_and_looser_preset(tmp
     b.series[-1] = last
     e.tick(NOW)
     assert 'Daily loss' in e.message and not b.posts
-    assert e.meta('loss-budget:' + str(NOW.date())) == '1500.000'
+    assert D(e.meta('loss-budget:' + str(NOW.date()))) == D('1500')
     e.close()
 
 

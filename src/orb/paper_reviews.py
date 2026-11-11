@@ -60,7 +60,9 @@ def basis(db, day):
     meta = [tuple(r) for r in db.execute('SELECT * FROM paper_meta ORDER BY key')]
     from orb.paper_fees import PaperFees
     fees = PaperFees(db).commitment()
-    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees))
+    from orb.paper_admission import PaperAdmission
+    admission = PaperAdmission(db).commitment()
+    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission))
 
 
 def capture_preflight(client, expected_scope):

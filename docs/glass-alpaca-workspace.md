@@ -77,3 +77,11 @@ Settings navigation, appearance/media handling and the opaque candle surface.
 The panel is read-only, uses an explicit posting-window anchor and distinguishes
 signed cash, partial reads and unavailable per-trade costs. See
 [account fee evidence](paper-account-fees.md). Presets/settings are unchanged.
+
+## Saved entry risk (11 November 2026)
+
+The existing paper settings now expose persisted planned reservations and loss
+checkpoints on demand. Trades exports the admission/release journal as a sixth
+stream. No navigation, appearance or strategy controls were added; presets and
+the approved media/candle layout remain intact. See
+[atomic paper admission](atomic-paper-admission.md) for amounts and limits.
