@@ -85,3 +85,11 @@ checkpoints on demand. Trades exports the admission/release journal as a sixth
 stream. No navigation, appearance or strategy controls were added; presets and
 the approved media/candle layout remain intact. See
 [atomic paper admission](atomic-paper-admission.md) for amounts and limits.
+
+## Saved order actions (12 November 2026)
+
+The existing paper settings now include an optional management-history view.
+It separates unknown commands, returned requests and broker confirmation; no
+retry/cancel/flatten control is added. Trades export v6 retains the seventh
+command stream. Presets, navigation, appearance and original media are unchanged.
+See [durable paper management](durable-paper-management.md).

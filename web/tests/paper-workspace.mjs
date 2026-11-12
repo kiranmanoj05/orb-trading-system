@@ -76,6 +76,23 @@ try {
     entries_blocked: false,
   };
   const state = () => ({
+    management: {
+      attempts: [
+        {
+          session: "2026-11-02",
+          state: "closing_outcome_unknown",
+          quantity: "4",
+          cancel_target_count: 3,
+          observed_at: "2026-11-02T15:00:00+00:00",
+          receipt: { outcome: "outcome_unknown" },
+          preflight: {
+            state: "two_agreeing_inventory_passes",
+            passes: [{}, {}],
+          },
+        },
+      ],
+      legacy_closing_sessions: [],
+    },
     admission: {
       active_count: 1,
       session_attempt_count: 1,
@@ -266,6 +283,31 @@ try {
   console.log(
     "PASS saved admission risk distinguishes planned cash/exposure/risk and consumed caps from broker balances",
   );
+  await page.getByText("Saved order actions", { exact: true }).click();
+  await page
+    .getByText("2026-11-02 · closing outcome unknown", { exact: true })
+    .waitFor();
+  await page
+    .getByText(
+      "Outcome unknown. Inspect broker orders; this command will not be sent again automatically.",
+      { exact: true },
+    )
+    .waitFor();
+  assert(
+    await page
+      .getByText(/Command receipts are not cancellation or fill confirmations/)
+      .isVisible(),
+  );
+  assert(
+    await page
+      .getByText(
+        /This does not establish cash reconciliation or recovery clearance/,
+      )
+      .isVisible(),
+  );
+  console.log(
+    "PASS durable management panel keeps unknown dispatch, broker confirmation and recovery clearance separate",
+  );
   const session = source.evidence.coverage[0].session;
   const ownedOrders = [
     orders[0],
@@ -424,12 +466,14 @@ try {
   const reviewExports = [],
     holdExports = [],
     feeExports = [],
-    admissionExports = [];
+    admissionExports = [],
+    managementExports = [];
   for (const [path, calls] of [
     ["reviews", reviewExports],
     ["hold-events", holdExports],
     ["fees", feeExports],
     ["admissions", admissionExports],
+    ["management", managementExports],
   ]) {
     await page.route(`**/api/paper/${path}?*`, async (route) => {
       const u = new URL(route.request().url()),
@@ -481,9 +525,18 @@ try {
     { after: "0" },
     { after: "20", through: "21" },
   ]);
+  assert.deepEqual(
+    exported.management_history.map((r) => r.seq),
+    [20, 21],
+  );
+  assert.deepEqual(managementExports, [
+    { after: "0" },
+    { after: "20", through: "21" },
+  ]);
+  assert.equal(exported.management_through, 21);
   assert.equal(exported.admissions_through, 21);
   assert.equal(exported.fees_through, 21);
-  assert.equal(exported.schema_version, "orb-paper-evidence-download-v5");
+  assert.equal(exported.schema_version, "orb-paper-evidence-download-v6");
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
   assert.deepEqual(

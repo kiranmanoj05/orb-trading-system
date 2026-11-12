@@ -186,12 +186,37 @@ export default function PaperEvidence({
             throw new Error(
               "Admission export exceeded its bound; no partial download was created.",
             );
+          const management: Row[] = [];
+          let managementAfter = 0,
+            managementThrough: number | undefined,
+            managementFinished = false;
+          for (let p = 0; p < 120; p++) {
+            const response = await fetch(
+              `/api/paper/management?after=${managementAfter}${managementThrough === undefined ? "" : `&through=${managementThrough}`}`,
+            );
+            const history = await response.json();
+            if (!response.ok)
+              throw new Error(history.detail || "Management export failed.");
+            managementThrough ??= history.through;
+            management.push(...history.events);
+            if (!history.has_more) {
+              managementFinished = true;
+              break;
+            }
+            if (history.next_after <= managementAfter)
+              throw new Error("Management cursor did not advance.");
+            managementAfter = history.next_after;
+          }
+          if (!managementFinished)
+            throw new Error(
+              "Management export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v5",
+                    schema_version: "orb-paper-evidence-download-v6",
                     report,
                     through,
                     observations,
@@ -199,6 +224,8 @@ export default function PaperEvidence({
                     activities_through: fillThrough,
                     correction_reviews: reviews,
                     reviews_through: reviewThrough,
+                    management_history: management,
+                    management_through: managementThrough,
                     admission_history: admissions,
                     admissions_through: admissionThrough,
                     account_fee_evidence: fees,
@@ -206,7 +233,7 @@ export default function PaperEvidence({
                     hold_events: holds,
                     holds_through: holdThrough,
                     notice:
-                      "Order observations, FILL activities, unattributed account FEE records, planned admission/release records and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
+                      "Order observations, FILL activities, unattributed account FEE records, planned admission/release, management command records and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,

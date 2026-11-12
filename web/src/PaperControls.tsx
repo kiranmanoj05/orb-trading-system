@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import PaperAdmission from "./PaperAdmission";
+import PaperManagement from "./PaperManagement";
 type Row = Record<string, any>;
 export default function PaperControls({
   status,
@@ -133,6 +134,7 @@ export default function PaperControls({
         </p>
       )}
       <PaperAdmission admission={status?.admission} />
+      <PaperManagement management={status?.management} />
       <details>
         <summary>Operation & limits</summary>
         <p className="drawer-note">
