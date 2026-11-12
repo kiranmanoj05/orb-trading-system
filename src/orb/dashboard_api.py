@@ -168,6 +168,13 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         return await run_in_threadpool(paper_engine.activity_events, after, through)
 
+    @app.get('/api/paper/management')
+    async def paper_management(after: int = 0, through: int | None = None):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        if not 0 <= after <= 1_000_000_000 or (through is not None and not 0 <= through <= 1_000_000_000):
+            raise HTTPException(422, 'Invalid evidence cursor.')
+        return await run_in_threadpool(paper_engine.management_events, after, through)
+
     @app.get('/api/paper/admissions')
     async def paper_admissions(after: int = 0, through: int | None = None):
         if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')

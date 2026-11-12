@@ -272,7 +272,7 @@ else:j.checkpoint(day,s,Decimal('100000'),scope)
 
 
 def test_schema5_upgrade_is_transactional_and_retains_state(tmp_path,monkeypatch):
-    e,j,path=new(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_admission_log');e.db.execute('PRAGMA user_version=5');e.close()
+    e,j,path=new(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_management_log');e.db.execute('DROP TABLE paper_admission_log');e.db.execute('PRAGMA user_version=5');e.close()
     import orb.paper_trading as m
     original=m.install_admission
     def fail(db):original(db);raise RuntimeError('interrupt migration')
@@ -284,7 +284,7 @@ def test_schema5_upgrade_is_transactional_and_retains_state(tmp_path,monkeypatch
     with path.with_suffix('.lock').open('a') as f:
         fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with pytest.raises(PaperError,match='Stop the existing'):PaperEngine(path)
-    e=PaperEngine(path);assert e.db.execute('PRAGMA user_version').fetchone()[0]==6
+    e=PaperEngine(path);assert e.db.execute('PRAGMA user_version').fetchone()[0]==7
     assert e.meta('loss-blocked:'+DAY)=='yes' and not e.enabled;e.close()
 
 

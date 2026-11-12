@@ -22,7 +22,7 @@ D = Decimal
 class Broker:
     def __init__(self):
         self.clock = {'timestamp': NOW.isoformat(), 'is_open': True}
-        self.account = dict(id='fixture-paper-account', equity='100000', cash='100000', status='ACTIVE',
+        self.account = dict(id='fixture-paper-account', currency='USD', equity='100000', cash='100000', status='ACTIVE',
                             trading_blocked=False, account_blocked=False)
         self.positions, self.open_orders = [], []
         self.posts, self.deletes = [], []
@@ -172,7 +172,7 @@ def test_partial_fill_cancellation_confirmed_before_residual_close(tmp_path):
 
 def test_eod_waits_for_exit_cancellation_then_checks_actual_residual(tmp_path):
     e,b=engine(tmp_path);e.tick(NOW)
-    b.parent.update(status='filled',filled_qty='10')
+    b.parent.update(status='canceled',filled_qty='10')
     end=SESSION.flatten_at+timedelta(seconds=1);b.clock['timestamp']=end.isoformat()
     e.tick(end)
     assert len(b.posts)==1 and b.deletes
@@ -342,7 +342,7 @@ def test_duplicate_exit_identity_cannot_double_count_fills(tmp_path):
 def test_loss_of_one_exit_cancels_remaining_exit_before_close(tmp_path):
     e, b = engine(tmp_path)
     e.tick(NOW)
-    b.parent.update(status='filled', filled_qty='4')
+    b.parent.update(status='canceled', filled_qty='4')
     b.parent['legs'][1]['status'] = 'rejected'
     b.positions = [dict(symbol='SPY', qty='4')]
     e.tick(NOW)

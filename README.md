@@ -32,6 +32,10 @@ The native paper worker now [atomically reserves entry risk](docs/atomic-paper-a
 with its saved intent, and releases headroom with terminal quantity evidence.
 Pending/partial attempts retain full planned headroom; this is separate from
 broker cash, net P&L and account-wide recovery clearance.
+Native [cancel/close management](docs/durable-paper-management.md) now journals
+commands before dispatch, retains unknown outcomes without automatic resend,
+and requires two agreeing bounded inventory reads before a residual close.
+Command receipts are separate from broker confirmation and recovery clearance.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled
