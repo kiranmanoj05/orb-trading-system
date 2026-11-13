@@ -75,7 +75,13 @@ try {
     holds: [],
     entries_blocked: false,
   };
+  let restart = {
+    worker_check_required: true, explicit_restart_required: true,
+    latest_matches_worker_epoch: false, basis_matches_current: false,
+    latest: { state: "entry_lookup_unknown", observed_at: "2026-11-02T15:00:00+00:00", can_continue: false, snapshot: { passes: [{}, {}] } },
+  };
   const state = () => ({
+    restart,
     management: {
       attempts: [
         {
@@ -308,6 +314,23 @@ try {
   console.log(
     "PASS durable management panel keeps unknown dispatch, broker confirmation and recovery clearance separate",
   );
+  await page.getByText("Restart check", { exact: true }).click();
+  await page.getByText("entry lookup unknown", { exact: true }).waitFor();
+  assert(await page.getByText(/Missing order lookups remain unknown/).isVisible());
+  const startCount = posts.length;
+  await page.route("**/api/paper/restart/check", async route => {
+    assert.equal(route.request().method(), "POST");
+    assert.equal(route.request().postData(), null);
+    restart = { ...restart, latest_matches_worker_epoch: true, basis_matches_current: true,
+      latest: { ...restart.latest, state: "owned_inventory_agrees", can_continue: true } };
+    await route.fulfill({ json: state() });
+  });
+  await page.getByRole("button", { name: "Check saved state", exact: true }).click();
+  await page.getByText("owned inventory agrees", { exact: true }).waitFor();
+  assert(await page.getByText(/Worker startup check required/).isVisible());
+  assert(await page.getByText(/Use Start to request a fresh worker check/).isVisible());
+  assert.equal(posts.length, startCount);
+  console.log("PASS manual restart inventory check preserves explicit Start and never replays worker actions");
   const session = source.evidence.coverage[0].session;
   const ownedOrders = [
     orders[0],
@@ -467,13 +490,15 @@ try {
     holdExports = [],
     feeExports = [],
     admissionExports = [],
-    managementExports = [];
+    managementExports = [],
+    restartExports = [];
   for (const [path, calls] of [
     ["reviews", reviewExports],
     ["hold-events", holdExports],
     ["fees", feeExports],
     ["admissions", admissionExports],
     ["management", managementExports],
+    ["restart", restartExports],
   ]) {
     await page.route(`**/api/paper/${path}?*`, async (route) => {
       const u = new URL(route.request().url()),
@@ -533,10 +558,13 @@ try {
     { after: "0" },
     { after: "20", through: "21" },
   ]);
+  assert.deepEqual(exported.restart_checkpoints.map(r => r.seq), [20, 21]);
+  assert.deepEqual(restartExports, [{ after: "0" }, { after: "20", through: "21" }]);
+  assert.equal(exported.restarts_through, 21);
   assert.equal(exported.management_through, 21);
   assert.equal(exported.admissions_through, 21);
   assert.equal(exported.fees_through, 21);
-  assert.equal(exported.schema_version, "orb-paper-evidence-download-v6");
+  assert.equal(exported.schema_version, "orb-paper-evidence-download-v7");
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
   assert.deepEqual(

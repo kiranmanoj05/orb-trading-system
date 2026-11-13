@@ -227,7 +227,7 @@ def test_new_fee_evidence_supersedes_review_basis_even_without_hold(tmp_path):
 
 
 def test_v4_migration_is_atomic_preserves_intents_latches_and_requires_worker_stop(tmp_path,monkeypatch):
-    e,_,_,path=setup(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_management_log');e.db.execute('DROP TABLE paper_admission_log');e.db.execute('DROP TABLE paper_fee_log');e.db.execute('PRAGMA user_version=4');e.close()
+    e,_,_,path=setup(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_restart_log');e.db.execute('DROP TABLE paper_management_log');e.db.execute('DROP TABLE paper_admission_log');e.db.execute('DROP TABLE paper_fee_log');e.db.execute('PRAGMA user_version=4');e.close()
     import orb.paper_trading as trading
     original=trading.install_fees
     def fail(db):original(db);raise RuntimeError('interrupted')
@@ -236,7 +236,7 @@ def test_v4_migration_is_atomic_preserves_intents_latches_and_requires_worker_st
     db=sqlite3.connect(path);assert db.execute('PRAGMA user_version').fetchone()[0]==4
     assert not db.execute("SELECT name FROM sqlite_master WHERE name='paper_fee_log'").fetchone();db.close()
     monkeypatch.setattr(trading,'install_fees',original)
-    e=PaperEngine(path);assert e.db.execute('PRAGMA user_version').fetchone()[0]==7
+    e=PaperEngine(path);assert e.db.execute('PRAGMA user_version').fetchone()[0]==8
     assert e.meta('loss-blocked:'+DAY)=='yes' and not e.enabled;e.close()
 
 

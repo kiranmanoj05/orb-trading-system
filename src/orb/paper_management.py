@@ -62,7 +62,7 @@ def inventory(account, positions, orders, scope, residual):
                 or Decimal(qty)<=0 or Decimal(filled)>Decimal(qty)):
             raise EvidenceError('invalid_close_inventory')
         seen.add(key);open_orders.append(dict(id=key,symbol=s,side=o['side'],status=o['status'],quantity=qty,filled_quantity=filled))
-    if Decimal(holdings.get('SPY','0'))!=Decimal(residual) or any(o['symbol']=='SPY' for o in open_orders):
+    if residual is not None and (Decimal(holdings.get('SPY','0'))!=Decimal(residual) or any(o['symbol']=='SPY' for o in open_orders)):
         raise EvidenceError('close_position_order_mismatch')
     stable=dict(scope=scope,currency='USD',holdings=dict(sorted(holdings.items())),orders=sorted(open_orders,key=lambda o:o['id']))
     return dict(stable=stable,observed_equity_usd=equity,observed_cash_usd=cash)

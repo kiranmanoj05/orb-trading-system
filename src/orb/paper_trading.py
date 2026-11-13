@@ -11,6 +11,7 @@ import fcntl
 import json
 from pathlib import Path
 import sqlite3
+from uuid import uuid4
 from threading import Event, RLock, Thread
 from time import monotonic
 from urllib.error import HTTPError, URLError
@@ -27,6 +28,7 @@ from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
+from orb.paper_restart import PaperRestart, TABLES as RESTART_TABLES, install as install_restart, basis as restart_basis, collect as collect_restart
 from orb.paper_management import PaperManagement, TABLES as MANAGEMENT_TABLES, install as install_management, capture_close_inventory
 from orb.paper_admission import PaperAdmission, TABLES as ADMISSION_TABLES, install as install_admission
 from orb.paper_fees import PaperFees, TABLES as FEE_TABLES, install as install_fees, fetch as fetch_fees, window as fee_window
@@ -128,6 +130,8 @@ class PaperEngine:
         self.file_lock = self.thread = None
         self.quit = Event()
         self.enabled = False
+        self.restart_required,self.restart_blocked,self.restart_seq=True,False,None
+        self.restart_epoch=uuid4().hex
         self.message = 'Stopped. Choose a paper preset and start.'
         self.market = self.updated_at = self.record = None
         self.feed = 'iex'
@@ -155,9 +159,10 @@ class PaperEngine:
             if version >= 5: expected_tables |= FEE_TABLES
             if version >= 6: expected_tables |= ADMISSION_TABLES
             if version >= 7: expected_tables |= MANAGEMENT_TABLES
-            if identity != 1330795600 or version not in (1, 2, 3, 4, 5, 6, 7) or tables != expected_tables:
+            if version >= 8: expected_tables |= RESTART_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3, 4, 5, 6, 7, 8) or tables != expected_tables:
                 raise PaperError('Unrecognised paper database; no changes made.')
-            if version in (1, 2, 3, 4, 5, 6):
+            if version in (1, 2, 3, 4, 5, 6, 7):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
@@ -169,9 +174,11 @@ class PaperEngine:
                 if version <= 3: install_reviews(self.db)
                 if version <= 4: install_fees(self.db)
                 if version <= 5: install_admission(self.db)
-                install_management(self.db)
-                self.db.execute('PRAGMA user_version=7')
+                if version <= 6: install_management(self.db)
+                install_restart(self.db)
+                self.db.execute('PRAGMA user_version=8')
             columns = {
+                'paper_restart_log': {'seq','observed_at','fingerprint','payload'},
                 'paper_management_log': {'seq','day','observed_at','fingerprint','payload'},
                 'paper_admission_log': {'seq','day','observed_at','fingerprint','payload'},
                 'paper_fee_log': {'seq','day','kind','activity_id','observed_at','fingerprint','payload'},
@@ -206,6 +213,7 @@ class PaperEngine:
         with self.lock:
             return dict(enabled=self.enabled, environment='paper', symbol='SPY', feed=self.feed,
                         message=self.message, updated_at=self.updated_at, preset=self.record, market=self.market,
+                        restart=PaperRestart(self.db).report(self.restart_epoch,self.restart_required,self.restart_blocked,self.restart_seq),
                         evidence=self.evidence.report(), admission=PaperAdmission(self.db).report(), management=PaperManagement(self.db).report(),
                         attempts=[dict(r) | {'request': json.loads(r['request']), 'preset': json.loads(r['preset'])}
                                   for r in self.db.execute('SELECT * FROM paper_attempts ORDER BY day DESC LIMIT 20')])
@@ -230,6 +238,8 @@ class PaperEngine:
             PaperAdmission(self.db).report()
             PaperManagement(self.db).report()
             if self.evidence.report()['entries_blocked']: raise PaperError('Saved broker evidence has a correction hold. Inspect Alpaca; automatic restart is blocked.')
+            self.restart_required,self.restart_blocked,self.restart_seq=True,False,None
+            self.restart_epoch=uuid4().hex
             if self.thread and self.thread.is_alive():
                 # Existing management thread can rearm without spawning a competitor.
                 self.settings, self.record, self.feed = settings, json.loads(json.dumps(record)), feed
@@ -277,10 +287,12 @@ class PaperEngine:
                 except PaperError as exc:
                     with self.lock:
                         self.enabled = False
+                        self.restart_required,self.restart_blocked=True,True
                         self.message = str(exc)
                 except Exception:
                     with self.lock:
                         self.enabled = False
+                        self.restart_required,self.restart_blocked=True,True
                         self.message = 'Worker paused after a broker/data error. Refresh account and inspect orders; restart to reconcile.'
                 if self.quit.wait(15): break
         finally:
@@ -297,6 +309,10 @@ class PaperEngine:
         PaperManagement(self.db).report()
         if self.evidence.report()['entries_blocked']:
             raise PaperError('Saved broker evidence has a correction hold. Automatic broker actions are blocked; inspect Alpaca.')
+        if self.restart_required:
+            if self.restart_blocked:return
+            result=self.check_restart(now,activate=True)
+            if not result['can_continue']:return
         clock = self.client.request('GET', '/v2/clock')
         if abs(now - timestamp(clock['timestamp'])) > timedelta(seconds=30): raise PaperError('Broker clock is stale.')
         if type(clock.get('is_open')) is not bool: raise PaperError('Missing market-open evidence.')
@@ -608,6 +624,33 @@ class PaperEngine:
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
             return self.evidence.report()
 
+
+    def check_restart(self,now,*,activate=False):
+        with self.lock,self.evidence_write_lease():
+            expected=restart_basis(self.db)
+            rows=[dict(r) for r in self.db.execute("SELECT * FROM paper_attempts WHERE state!='done' ORDER BY day")]
+            scope=self.meta('account');epoch=self.restart_epoch if activate else None
+            client=self.client
+            if not (len(rows)>1 or (rows and scope is None)):client=client or PaperClient()
+            started=self.observation_clock()
+        snapshot,captures=collect_restart(client,rows,scope,now,lambda:self.observation_clock()-started)
+        at=(now+timedelta(seconds=self.observation_clock()-started)).isoformat()
+        with self.lock,self.evidence_write_lease():
+            result=PaperRestart(self.db).save(expected,snapshot,captures,now.isoformat(),at,epoch,'startup' if activate else 'manual_read')
+            if not result['can_continue']:
+                self.enabled=False;self.restart_required=True;self.restart_blocked=True
+                detail='entry order not found; outcome unknown' if result['state']=='entry_lookup_unknown' else 'closing order not found; not resent' if result['state']=='closing_lookup_unknown' else result['state'].replace('_',' ')
+                self.message=f'Restart check blocked: {detail}. Inspect account/orders and start again.'
+            elif activate and epoch==self.restart_epoch:
+                self.restart_required=False;self.restart_blocked=False;self.restart_seq=result['seq']
+            return result
+
+    def refresh_restart(self):
+        self.check_restart(self.review_clock())
+        return self.status()
+
+    def restart_events(self,after=0,through=None):
+        with self.lock:return PaperRestart(self.db).export(after,through)
 
     def management_events(self,after=0,through=None):
         with self.lock:return PaperManagement(self.db).export(after,through)

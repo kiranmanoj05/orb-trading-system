@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import PaperAdmission from "./PaperAdmission";
 import PaperManagement from "./PaperManagement";
+import PaperRestart from "./PaperRestart";
 type Row = Record<string, any>;
 export default function PaperControls({
   status,
@@ -135,6 +136,7 @@ export default function PaperControls({
       )}
       <PaperAdmission admission={status?.admission} />
       <PaperManagement management={status?.management} />
+      <PaperRestart restart={status?.restart} changed={changed} />
       <details>
         <summary>Operation & limits</summary>
         <p className="drawer-note">

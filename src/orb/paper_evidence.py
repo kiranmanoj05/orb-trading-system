@@ -179,21 +179,24 @@ class PaperEvidence:
     def holds(self):
         from orb.paper_fees import PaperFees
         fee_hold = PaperFees(self.db).hold()
-        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')] + ([fee_hold] if fee_hold else [])
+        from orb.paper_restart import capacity_hold
+        restart_hold = capacity_hold(self.db)
+        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')] + ([fee_hold] if fee_hold else []) + ([restart_hold] if restart_hold else [])
 
     def _hold(self, day, reason, at):
         from orb.paper_reviews import record_hold
         record_hold(self.db,day,reason,at,'order_observation')
 
-    def capture(self, row, parent, closing, observed_at):
+    def capture(self, row, parent, closing, observed_at, *, transaction=True):
         at = stamp(observed_at)
-        self.db.execute('BEGIN IMMEDIATE')
+        if transaction:self.db.execute('BEGIN IMMEDIATE')
+        elif not self.db.in_transaction:raise EvidenceError('observation_transaction_required')
         try:
             try: payload = bundle(row, parent, closing, at)
             except (EvidenceError, TypeError, KeyError) as exc:
                 reason = str(exc) if isinstance(exc, EvidenceError) else 'malformed_owned_order_evidence'
                 self._hold(row['day'], reason, at)
-                self.db.execute('COMMIT')
+                if transaction:self.db.execute('COMMIT')
                 raise EvidenceError(reason) from None
             old = self.db.execute('SELECT o.*, h.last_seen_at FROM paper_observations o '
                 'JOIN paper_observation_heads h ON h.seq=o.seq WHERE h.day=?', (row['day'],)).fetchone()
@@ -226,9 +229,9 @@ class PaperEvidence:
                     seq = self.db.execute('INSERT INTO paper_observations(day,observed_at,fingerprint,payload) VALUES (?,?,?,?)',
                         (row['day'], at, fingerprint, encoded(payload))).lastrowid
                     self.db.execute('INSERT OR REPLACE INTO paper_observation_heads VALUES (?,?,?)', (row['day'], seq, at))
-            self.db.execute('COMMIT')
+            if transaction:self.db.execute('COMMIT')
         except BaseException:
-            if self.db.in_transaction: self.db.execute('ROLLBACK')
+            if transaction and self.db.in_transaction: self.db.execute('ROLLBACK')
             raise
 
     def events(self, after=0, limit=100, through=None):
