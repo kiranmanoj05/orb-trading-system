@@ -93,3 +93,7 @@ It separates unknown commands, returned requests and broker confirmation; no
 retry/cancel/flatten control is added. Trades export v6 retains the seventh
 command stream. Presets, navigation, appearance and original media are unchanged.
 See [durable paper management](durable-paper-management.md).
+
+### 13 November 2026: restart evidence
+
+The existing paper drawer has an on-demand Restart check panel with a real read-only Check saved state action. It distinguishes required worker checks, blocked/unknown outcomes and superseded receipts. It never starts the worker or clears holds. The v7 combined evidence export includes frozen restart history. Equity, candles, two-item navigation, optical droplet and appearance/media settings remain unchanged. See [native restart checkpoint](native-restart-checkpoint.md) for bounds and recovery limitations.

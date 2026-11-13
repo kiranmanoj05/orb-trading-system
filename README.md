@@ -36,6 +36,10 @@ Native [cancel/close management](docs/durable-paper-management.md) now journals
 commands before dispatch, retains unknown outcomes without automatic resend,
 and requires two agreeing bounded inventory reads before a residual close.
 Command receipts are separate from broker confirmation and recovery clearance.
+Native [startup checkpoints](docs/native-restart-checkpoint.md) now require two
+fresh account/order inventory observations before continuing. Missing orders stay
+unknown; manual checks never start the worker or replay commands. Evidence export
+v7 includes the bounded restart history.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

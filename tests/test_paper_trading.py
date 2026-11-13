@@ -63,6 +63,9 @@ def engine(tmp_path, broker=None):
     e.settings = e.validate(PresetStore.paper('paper-balanced'), 'iex')
     e.record = PresetStore.paper('paper-balanced')
     e.enabled = True
+    # Existing worker-path fixtures represent an already checked running worker.
+    # Dedicated restart tests retain the constructor's required startup gate.
+    e.restart_required = False
     return e, b
 
 

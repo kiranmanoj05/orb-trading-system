@@ -64,7 +64,9 @@ def basis(db, day):
     admission = PaperAdmission(db).commitment()
     from orb.paper_management import PaperManagement
     management = PaperManagement(db).commitment()
-    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission,management=management))
+    from orb.paper_restart import PaperRestart
+    restart = PaperRestart(db).commitment()
+    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission,management=management,restart=restart))
 
 
 def capture_preflight(client, expected_scope):

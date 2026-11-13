@@ -278,7 +278,7 @@ def test_append_only_and_corrupt_proof_are_detected(tmp_path):
 
 
 def test_schema6_upgrade_preserves_closing_latches_and_rolls_back_interruption(tmp_path,monkeypatch):
-    e,j,b,path=ready(tmp_path);e.db.execute('DROP TABLE paper_management_log');e.db.execute('PRAGMA user_version=6')
+    e,j,b,path=ready(tmp_path);e.db.execute('DROP TABLE paper_restart_log');e.db.execute('DROP TABLE paper_management_log');e.db.execute('PRAGMA user_version=6')
     e.meta('loss-blocked:'+DAY,'yes');e.db.execute('UPDATE paper_attempts SET closing=?',(json.dumps(dict(client_order_id='legacy-close')),));e.close()
     import orb.paper_trading as m
     original=m.install_management
@@ -288,7 +288,7 @@ def test_schema6_upgrade_preserves_closing_latches_and_rolls_back_interruption(t
     db=sqlite3.connect(path);assert db.execute('PRAGMA user_version').fetchone()[0]==6
     assert not db.execute("SELECT name FROM sqlite_master WHERE name='paper_management_log'").fetchone();db.close()
     monkeypatch.setattr(m,'install_management',original);e=PaperEngine(path)
-    assert e.db.execute('PRAGMA user_version').fetchone()[0]==7 and e.meta('loss-blocked:'+DAY)=='yes'
+    assert e.db.execute('PRAGMA user_version').fetchone()[0]==8 and e.meta('loss-blocked:'+DAY)=='yes'
     assert e.status()['management']['legacy_closing_sessions']==[DAY] and not e.enabled;e.close()
 
 
