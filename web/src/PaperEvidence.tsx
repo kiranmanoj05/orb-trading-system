@@ -224,12 +224,25 @@ export default function PaperEvidence({
             restartAfter = history.next_after;
           }
           if (!restartFinished) throw new Error("Restart export exceeded its bound; no partial download was created.");
+          const cash: Row[] = [];
+          let cashAfter = 0, cashThrough: number | undefined, cashFinished = false;
+          for (let p = 0; p < 2; p++) {
+            const response = await fetch(`/api/paper/cash?after=${cashAfter}${cashThrough === undefined ? "" : `&through=${cashThrough}`}`);
+            const history = await response.json();
+            if (!response.ok) throw new Error(history.detail || "Cash export failed.");
+            cashThrough ??= history.through;
+            cash.push(...history.events);
+            if (!history.has_more) { cashFinished = true; break; }
+            if (history.next_after <= cashAfter) throw new Error("Cash cursor did not advance.");
+            cashAfter = history.next_after;
+          }
+          if (!cashFinished) throw new Error("Cash export exceeded its bound; no partial download was created.");
           const url = URL.createObjectURL(
             new Blob(
               [
                 JSON.stringify(
                   {
-                    schema_version: "orb-paper-evidence-download-v7",
+                    schema_version: "orb-paper-evidence-download-v8",
                     report,
                     through,
                     observations,
@@ -237,6 +250,8 @@ export default function PaperEvidence({
                     activities_through: fillThrough,
                     correction_reviews: reviews,
                     reviews_through: reviewThrough,
+                    cash_bridges: cash,
+                    cash_through: cashThrough,
                     restart_checkpoints: restarts,
                     restarts_through: restartThrough,
                     management_history: management,
@@ -248,7 +263,7 @@ export default function PaperEvidence({
                     hold_events: holds,
                     holds_through: holdThrough,
                     notice:
-                      "Order observations, FILL activities, unattributed account FEE records, planned admission/release, management command records, startup inventory checkpoints and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
+                      "Order observations, FILL activities, unattributed account FEE records, planned admission/release, management command records, startup inventory checkpoints, account cash bridges and review records; streams have separate times/watermarks. Reviews do not clear holds. No execution completeness, fees, net P&L or account reconciliation is established.",
                   },
                   null,
                   2,

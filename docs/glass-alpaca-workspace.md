@@ -97,3 +97,7 @@ See [durable paper management](durable-paper-management.md).
 ### 13 November 2026: restart evidence
 
 The existing paper drawer has an on-demand Restart check panel with a real read-only Check saved state action. It distinguishes required worker checks, blocked/unknown outcomes and superseded receipts. It never starts the worker or clears holds. The v7 combined evidence export includes frozen restart history. Equity, candles, two-item navigation, optical droplet and appearance/media settings remain unchanged. See [native restart checkpoint](native-restart-checkpoint.md) for bounds and recovery limitations.
+
+### 14 November 2026: cash and activity
+
+The existing paper drawer now includes on-demand Cash & activity. Its real read action saves a fixed anchor, then shows observed cash/share changes, included gross fill effects and unresolved differences. Uncertain posting times remain explicit; no worker start or hold-clearance control was added. Export v8 includes cash bridge history. Preset settings and the minimal equity/candle/media layout are unchanged. See [account cash bridge](paper-cash-bridge.md).

@@ -28,6 +28,7 @@ from orb.session import exchange_session
 from orb.strategy import calculate_opening_range, NEW_YORK
 from orb.paper_evidence import PaperEvidence, EvidenceError, TABLES as EVIDENCE_TABLES, install as install_evidence
 from orb.paper_activities import PaperActivities, TABLES as ACTIVITY_TABLES, install as install_activities, fetch as fetch_activities
+from orb.paper_cash import PaperCash, TABLES as CASH_TABLES, install as install_cash, collect as collect_cash
 from orb.paper_restart import PaperRestart, TABLES as RESTART_TABLES, install as install_restart, basis as restart_basis, collect as collect_restart
 from orb.paper_management import PaperManagement, TABLES as MANAGEMENT_TABLES, install as install_management, capture_close_inventory
 from orb.paper_admission import PaperAdmission, TABLES as ADMISSION_TABLES, install as install_admission
@@ -160,9 +161,10 @@ class PaperEngine:
             if version >= 6: expected_tables |= ADMISSION_TABLES
             if version >= 7: expected_tables |= MANAGEMENT_TABLES
             if version >= 8: expected_tables |= RESTART_TABLES
-            if identity != 1330795600 or version not in (1, 2, 3, 4, 5, 6, 7, 8) or tables != expected_tables:
+            if version >= 9: expected_tables |= CASH_TABLES
+            if identity != 1330795600 or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9) or tables != expected_tables:
                 raise PaperError('Unrecognised paper database; no changes made.')
-            if version in (1, 2, 3, 4, 5, 6, 7):
+            if version in (1, 2, 3, 4, 5, 6, 7, 8):
                 lock_path = self.path.with_suffix('.lock')
                 if lock_path.is_symlink(): raise PaperError('Paper lock symlinks are not supported.')
                 migration_lock = lock_path.open('a')
@@ -175,9 +177,11 @@ class PaperEngine:
                 if version <= 4: install_fees(self.db)
                 if version <= 5: install_admission(self.db)
                 if version <= 6: install_management(self.db)
-                install_restart(self.db)
-                self.db.execute('PRAGMA user_version=8')
+                if version <= 7: install_restart(self.db)
+                install_cash(self.db)
+                self.db.execute('PRAGMA user_version=9')
             columns = {
+                'paper_cash_log': {'seq','observed_at','fingerprint','payload'},
                 'paper_restart_log': {'seq','observed_at','fingerprint','payload'},
                 'paper_management_log': {'seq','day','observed_at','fingerprint','payload'},
                 'paper_admission_log': {'seq','day','observed_at','fingerprint','payload'},
@@ -213,6 +217,7 @@ class PaperEngine:
         with self.lock:
             return dict(enabled=self.enabled, environment='paper', symbol='SPY', feed=self.feed,
                         message=self.message, updated_at=self.updated_at, preset=self.record, market=self.market,
+                        cash_bridge=PaperCash(self.db).report(),
                         restart=PaperRestart(self.db).report(self.restart_epoch,self.restart_required,self.restart_blocked,self.restart_seq),
                         evidence=self.evidence.report(), admission=PaperAdmission(self.db).report(), management=PaperManagement(self.db).report(),
                         attempts=[dict(r) | {'request': json.loads(r['request']), 'preset': json.loads(r['preset'])}
@@ -624,6 +629,29 @@ class PaperEngine:
                 self.message = 'Broker correction evidence is held. Automatic broker actions blocked; inspect Alpaca.'
             return self.evidence.report()
 
+
+    def refresh_cash(self):
+        with self.lock,self.evidence_write_lease():
+            journal=PaperCash(self.db);anchor=journal.anchor();expected=restart_basis(self.db)
+            scope=self.meta('account')
+            if scope is None and self.db.execute('SELECT 1 FROM paper_attempts').fetchone():
+                raise PaperError('Missing saved paper account scope; preserve the database.')
+            known={}
+            for row in self.db.execute('SELECT payload,fingerprint FROM paper_observations ORDER BY seq'):
+                from orb.paper_evidence import verified
+                for order in verified(row)['orders']:known[order['id']]=order
+            client=self.client or PaperClient();now=self.review_clock();started=self.observation_clock()
+        capture=collect_cash(client,scope,anchor,known,now,lambda:self.observation_clock()-started)
+        at=(now+timedelta(seconds=self.observation_clock()-started)).isoformat()
+        with self.lock,self.evidence_write_lease():
+            journal.save(expected,capture,at)
+            if self.evidence.holds():
+                self.enabled=False;self.restart_required=True;self.restart_blocked=True
+                self.message='Account cash/activity correction is held. Automatic broker actions blocked; inspect Alpaca.'
+            return self.status()
+
+    def cash_events(self,after=0,through=None):
+        with self.lock:return PaperCash(self.db).export(after,through)
 
     def check_restart(self,now,*,activate=False):
         with self.lock,self.evidence_write_lease():

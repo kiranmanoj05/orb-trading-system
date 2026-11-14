@@ -35,7 +35,7 @@ def capacity_hold(db):
 def basis(db):
     PaperAdmission(db).report();PaperManagement(db).report()
     marks={}
-    for table in ('paper_observations','paper_fill_activities','paper_activity_scans','paper_hold_events','paper_review_log','paper_fee_log','paper_admission_log','paper_management_log'):
+    for table in ('paper_observations','paper_fill_activities','paper_activity_scans','paper_hold_events','paper_review_log','paper_fee_log','paper_admission_log','paper_management_log','paper_cash_log'):
         rows=list(db.execute(f'SELECT * FROM {table} ORDER BY seq'))
         for r in rows:verified(r)
         marks[table]=[(r['seq'],r['fingerprint']) for r in rows]

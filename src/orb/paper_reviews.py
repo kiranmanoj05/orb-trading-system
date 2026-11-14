@@ -66,7 +66,9 @@ def basis(db, day):
     management = PaperManagement(db).commitment()
     from orb.paper_restart import PaperRestart
     restart = PaperRestart(db).commitment()
-    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission,management=management,restart=restart))
+    from orb.paper_cash import PaperCash
+    cash = PaperCash(db).commitment()
+    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission,management=management,restart=restart,cash=cash))
 
 
 def capture_preflight(client, expected_scope):
