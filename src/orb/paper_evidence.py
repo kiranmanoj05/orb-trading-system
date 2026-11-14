@@ -181,7 +181,9 @@ class PaperEvidence:
         fee_hold = PaperFees(self.db).hold()
         from orb.paper_restart import capacity_hold
         restart_hold = capacity_hold(self.db)
-        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')] + ([fee_hold] if fee_hold else []) + ([restart_hold] if restart_hold else [])
+        from orb.paper_cash import PaperCash
+        cash_hold = PaperCash(self.db).hold()
+        return [dict(r) for r in self.db.execute('SELECT * FROM paper_evidence_holds ORDER BY day')] + ([fee_hold] if fee_hold else []) + ([restart_hold] if restart_hold else []) + ([cash_hold] if cash_hold else [])
 
     def _hold(self, day, reason, at):
         from orb.paper_reviews import record_hold

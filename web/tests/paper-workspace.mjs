@@ -80,7 +80,9 @@ try {
     latest_matches_worker_epoch: false, basis_matches_current: false,
     latest: { state: "entry_lookup_unknown", observed_at: "2026-11-02T15:00:00+00:00", can_continue: false, snapshot: { passes: [{}, {}] } },
   };
+  let cash = { anchor_seq: null, latest: null };
   const state = () => ({
+    cash_bridge: cash,
     restart,
     management: {
       attempts: [
@@ -331,6 +333,35 @@ try {
   assert(await page.getByText(/Use Start to request a fresh worker check/).isVisible());
   assert.equal(posts.length, startCount);
   console.log("PASS manual restart inventory check preserves explicit Start and never replays worker actions");
+  await page.getByText("Cash & activity", { exact: true }).click();
+  await page.getByText("No saved cash anchor yet.", { exact: true }).waitFor();
+  let cashReads = 0;
+  await page.route("**/api/paper/cash/check", async route => {
+    assert.equal(route.request().method(), "POST");
+    assert.equal(route.request().postData(), null);
+    cashReads++;
+    if (cashReads === 1) return route.fulfill({ status: 409, json: { detail: "Cash read unavailable." } });
+    cash = { anchor_seq: 1, latest: { observed_at: "2026-11-02T15:00:00+00:00", result: {
+      state: "activity_timing_or_effect_unknown", observed_cash_delta_usd: "-200.1", modeled_gross_fill_cash_usd: "-200", unexplained_cash_usd: null, observed_minus_included_fill_cash_usd: "-0.1", included_fills: 1, uncertain_records: 1,
+      positions: [{ symbol: "SPY", observed_quantity_delta: "2", fill_quantity_delta: "2", residual_quantity: "0" }],
+    }, capture: { snapshot_valid: true, scan: { scan_finished: true, received: 2 }, events: [
+      { activity_id: "fee", activity_type: "FEE", signed_cash_amount: "-0.1", activity_date: "2026-11-02", attribution: "account_only_unattributed" },
+    ] } } };
+    await route.fulfill({ json: state() });
+  });
+  await page.getByRole("button", { name: "Read cash & activity", exact: true }).click();
+  await page.getByText("Cash read unavailable.", { exact: true }).waitFor();
+  assert.equal(posts.length, startCount);
+  console.log("PASS cash bridge read failure stays recoverable without worker actions");
+  await page.getByRole("button", { name: "Read cash & activity", exact: true }).click();
+  await page.getByText("Cash minus included fills: -0.1 USD", { exact: true }).waitFor();
+  await page.getByText("Unexplained cash: Unavailable", { exact: true }).waitFor();
+  await page.getByText("SPY quantity change: 2 · fill change: 2 · residual: 0 shares", { exact: true }).waitFor();
+  await page.getByText("Observed account activity", { exact: true }).click();
+  await page.getByText("Reported signed cash: -0.1 USD · posting time unavailable", { exact: true }).waitFor();
+  assert(await page.getByText(/settled cash, fee coverage and net strategy profit remain unverified/).isVisible());
+  assert.equal(posts.length, startCount);
+  console.log("PASS account cash residual and ambiguous fee timing remain explicit without net profit or Start");
   const session = source.evidence.coverage[0].session;
   const ownedOrders = [
     orders[0],
@@ -491,7 +522,8 @@ try {
     feeExports = [],
     admissionExports = [],
     managementExports = [],
-    restartExports = [];
+    restartExports = [],
+    cashExports = [];
   for (const [path, calls] of [
     ["reviews", reviewExports],
     ["hold-events", holdExports],
@@ -499,6 +531,7 @@ try {
     ["admissions", admissionExports],
     ["management", managementExports],
     ["restart", restartExports],
+    ["cash", cashExports],
   ]) {
     await page.route(`**/api/paper/${path}?*`, async (route) => {
       const u = new URL(route.request().url()),
@@ -561,10 +594,13 @@ try {
   assert.deepEqual(exported.restart_checkpoints.map(r => r.seq), [20, 21]);
   assert.deepEqual(restartExports, [{ after: "0" }, { after: "20", through: "21" }]);
   assert.equal(exported.restarts_through, 21);
+  assert.deepEqual(exported.cash_bridges.map(r => r.seq), [20, 21]);
+  assert.deepEqual(cashExports, [{ after: "0" }, { after: "20", through: "21" }]);
+  assert.equal(exported.cash_through, 21);
   assert.equal(exported.management_through, 21);
   assert.equal(exported.admissions_through, 21);
   assert.equal(exported.fees_through, 21);
-  assert.equal(exported.schema_version, "orb-paper-evidence-download-v7");
+  assert.equal(exported.schema_version, "orb-paper-evidence-download-v8");
   assert.equal(exported.activities_through, 11);
   assert.equal(exported.fill_activities[0].fees_usd, null);
   assert.deepEqual(

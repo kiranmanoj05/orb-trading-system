@@ -40,6 +40,11 @@ Native [startup checkpoints](docs/native-restart-checkpoint.md) now require two
 fresh account/order inventory observations before continuing. Missing orders stay
 unknown; manual checks never start the worker or replay commands. Evidence export
 v7 includes the bounded restart history.
+An [account cash/activity bridge](docs/paper-cash-bridge.md) now compares a fixed
+opening anchor with later cash/share changes and all-account activity. Ambiguous
+posting times and incomplete scans keep the full comparison unavailable; arithmetic
+agreement never clears holds or establishes net strategy profit. Export v8 retains
+the ninth cash-evidence stream.
 An independent SQLite entry-intent journal now provides atomic local claims,
 restart evidence and cumulative fill observations for future paper integration.
 An offline durable coordinator connects admitted/rejected candidates, modeled

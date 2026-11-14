@@ -334,7 +334,7 @@ def test_api_exact_empty_body_origin_read_only_result_and_export(tmp_path):
 
 
 def test_schema7_migration_is_atomic_and_does_not_invent_checkpoint(tmp_path,monkeypatch):
-    e,b,row=saved(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_restart_log');e.db.execute('PRAGMA user_version=7');e.close()
+    e,b,row=saved(tmp_path);e.meta('loss-blocked:'+DAY,'yes');e.db.execute('DROP TABLE paper_cash_log');e.db.execute('DROP TABLE paper_restart_log');e.db.execute('PRAGMA user_version=7');e.close()
     import orb.paper_trading as m
     original=m.install_restart
     def fail(db):original(db);raise RuntimeError('migration interrupted')
@@ -343,7 +343,7 @@ def test_schema7_migration_is_atomic_and_does_not_invent_checkpoint(tmp_path,mon
     db=sqlite3.connect(tmp_path/'paper.sqlite');assert db.execute('PRAGMA user_version').fetchone()[0]==7
     assert not db.execute("SELECT name FROM sqlite_master WHERE name='paper_restart_log'").fetchone();db.close()
     monkeypatch.setattr(m,'install_restart',original);e=PaperEngine(tmp_path/'paper.sqlite')
-    assert e.db.execute('PRAGMA user_version').fetchone()[0]==8 and e.meta('loss-blocked:'+DAY)=='yes'
+    assert e.db.execute('PRAGMA user_version').fetchone()[0]==9 and e.meta('loss-blocked:'+DAY)=='yes'
     assert e.restart_required and not PaperRestart(e.db).export()['events'] and not e.enabled;e.close()
 
 
