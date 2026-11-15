@@ -2,6 +2,12 @@
 
 A Python research and paper-trading project implementing Opening Range Breakout.
 
+For on-demand performance reports, conditional paper cost estimates and the
+account-session acceptance checklist, see
+[performance and release acceptance](docs/performance-and-release.md).
+An accurate [portfolio case study](docs/portfolio-case-study.md) separates shipped
+engineering from unverified broker operation and unestablished profitability.
+
 ## Status
 
 The implementation validates completed one-minute bars, calculates a 15-minute

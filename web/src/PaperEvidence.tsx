@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import PaperReview from "./PaperReview";
 import PaperFees from "./PaperFees";
+import Performance from "./Performance";
 type Row = Record<string, any>;
 const amount = (v: any) =>
   v == null
@@ -212,31 +213,55 @@ export default function PaperEvidence({
               "Management export exceeded its bound; no partial download was created.",
             );
           const restarts: Row[] = [];
-          let restartAfter = 0, restartThrough: number | undefined, restartFinished = false;
+          let restartAfter = 0,
+            restartThrough: number | undefined,
+            restartFinished = false;
           for (let p = 0; p < 20; p++) {
-            const response = await fetch(`/api/paper/restart?after=${restartAfter}${restartThrough === undefined ? "" : `&through=${restartThrough}`}`);
+            const response = await fetch(
+              `/api/paper/restart?after=${restartAfter}${restartThrough === undefined ? "" : `&through=${restartThrough}`}`,
+            );
             const history = await response.json();
-            if (!response.ok) throw new Error(history.detail || "Restart export failed.");
+            if (!response.ok)
+              throw new Error(history.detail || "Restart export failed.");
             restartThrough ??= history.through;
             restarts.push(...history.events);
-            if (!history.has_more) { restartFinished = true; break; }
-            if (history.next_after <= restartAfter) throw new Error("Restart cursor did not advance.");
+            if (!history.has_more) {
+              restartFinished = true;
+              break;
+            }
+            if (history.next_after <= restartAfter)
+              throw new Error("Restart cursor did not advance.");
             restartAfter = history.next_after;
           }
-          if (!restartFinished) throw new Error("Restart export exceeded its bound; no partial download was created.");
+          if (!restartFinished)
+            throw new Error(
+              "Restart export exceeded its bound; no partial download was created.",
+            );
           const cash: Row[] = [];
-          let cashAfter = 0, cashThrough: number | undefined, cashFinished = false;
+          let cashAfter = 0,
+            cashThrough: number | undefined,
+            cashFinished = false;
           for (let p = 0; p < 2; p++) {
-            const response = await fetch(`/api/paper/cash?after=${cashAfter}${cashThrough === undefined ? "" : `&through=${cashThrough}`}`);
+            const response = await fetch(
+              `/api/paper/cash?after=${cashAfter}${cashThrough === undefined ? "" : `&through=${cashThrough}`}`,
+            );
             const history = await response.json();
-            if (!response.ok) throw new Error(history.detail || "Cash export failed.");
+            if (!response.ok)
+              throw new Error(history.detail || "Cash export failed.");
             cashThrough ??= history.through;
             cash.push(...history.events);
-            if (!history.has_more) { cashFinished = true; break; }
-            if (history.next_after <= cashAfter) throw new Error("Cash cursor did not advance.");
+            if (!history.has_more) {
+              cashFinished = true;
+              break;
+            }
+            if (history.next_after <= cashAfter)
+              throw new Error("Cash cursor did not advance.");
             cashAfter = history.next_after;
           }
-          if (!cashFinished) throw new Error("Cash export exceeded its bound; no partial download was created.");
+          if (!cashFinished)
+            throw new Error(
+              "Cash export exceeded its bound; no partial download was created.",
+            );
           const url = URL.createObjectURL(
             new Blob(
               [
@@ -411,6 +436,23 @@ export default function PaperEvidence({
         </article>
       ))}
       <PaperFees fees={report?.account_fees} changed={changed} />
+      <Performance
+        revision={JSON.stringify([
+          report?.entries_blocked,
+          report?.attempts_may_be_truncated,
+          report?.account_fees?.state,
+          report?.account_fees?.scan?.observed_at,
+          report?.attempts?.map((a: Row) => [
+            a.session,
+            a.state,
+            a.observation_seq,
+            a.preset_version,
+            a.fill_activities?.state,
+            a.fill_activities?.scan?.observed_at,
+            a.fill_activities?.event_count,
+          ]),
+        ])}
+      />
       <button disabled={!!busy || !report} onClick={exportHistory}>
         Export saved paper evidence
       </button>
