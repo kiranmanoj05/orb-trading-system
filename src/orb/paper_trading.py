@@ -630,6 +630,17 @@ class PaperEngine:
             return self.evidence.report()
 
 
+    def performance(self):
+        from orb.paper_performance import paper_performance
+        with self.lock:
+            # One read snapshot across presets, order heads, fills and holds.
+            # This never acquires an execution lease or writes a receipt.
+            self.db.execute('BEGIN')
+            try:
+                return paper_performance(self.db, self.evidence.report())
+            finally:
+                self.db.execute('ROLLBACK')
+
     def refresh_cash(self):
         with self.lock,self.evidence_write_lease():
             journal=PaperCash(self.db);anchor=journal.anchor();expected=restart_basis(self.db)

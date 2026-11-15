@@ -161,6 +161,11 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         if through is not None and not 0 <= through <= 1_000_000_000: raise HTTPException(422, 'Invalid evidence cursor.')
         return await run_in_threadpool(paper_engine.evidence_events, after, through)
 
+    @app.get('/api/paper/performance')
+    async def paper_performance_report():
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        return await run_in_threadpool(paper_engine.performance)
+
     @app.get('/api/paper/activities')
     async def paper_activities(after: int = 0, through: int | None = None):
         if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
@@ -453,6 +458,19 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
     async def get_run(run_id: str):
         try: return research.get_run(run_id)
         except KeyError: raise HTTPException(404,'research run not found') from None
+
+    @app.get('/api/runs/{run_id}/performance')
+    async def performance_report(run_id: str, format: str = 'json'):
+        from orb.performance import historical_performance, render_performance
+        if format not in ('json', 'markdown'): raise HTTPException(422, 'Unsupported report format.')
+        try: run = research.get_run(run_id)
+        except KeyError: raise HTTPException(404, 'research run not found') from None
+        try: report = await run_in_threadpool(historical_performance, run)
+        except ValueError: raise HTTPException(422, 'Performance report exceeds supported bounds.') from None
+        if format == 'markdown':
+            return Response(render_performance(report), media_type='text/markdown', headers={
+                'Content-Disposition': 'attachment; filename="orb-performance.md"'})
+        return report
 
     @app.get('/api/runs/{run_id}/source')
     async def get_source(run_id: str):

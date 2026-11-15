@@ -114,13 +114,15 @@ def main() -> None:
     backtest.add_argument("--quantity", type=int, default=1)
     backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument("--fee-per-share", type=Decimal, default=Decimal("0"))
-    for command in ("portfolio", "evaluate", "evaluate-bundle"):
+    for command in ("portfolio", "evaluate", "evaluate-bundle", "performance"):
         portfolio = commands.add_parser(command, help="shared account replay or reproducible evaluation")
         portfolio.add_argument("csv", type=Path,
                                metavar="BUNDLE" if command == "evaluate-bundle" else "CSV")
         portfolio.add_argument("--output", type=Path)
         portfolio.add_argument("--daily-loss-fraction", type=Decimal, default=Decimal("0.02"))
-        if command in ("evaluate", "evaluate-bundle"):
+        if command == 'performance':
+            portfolio.add_argument('--synthetic', action='store_true', help='explicitly label invented source data')
+        if command in ("evaluate", "evaluate-bundle", "performance"):
             portfolio.add_argument("--report", type=Path, help="write Markdown companion")
             portfolio.add_argument("--data-label", default="unspecified")
             portfolio.add_argument("--start-session", type=date.fromisoformat)
@@ -233,27 +235,32 @@ def main() -> None:
         except ValueError as exc:
             parser.exit(2, f"Session error: {exc}\n")
         return
-    if args.command not in ("replay", "simulate", "portfolio", "evaluate", "evaluate-bundle"):
+    if args.command not in ("replay", "simulate", "portfolio", "evaluate", "evaluate-bundle", "performance"):
         demo()
         return
     try:
         bars = args.csv if args.command == "evaluate-bundle" else load_bars(args.csv)
-        if args.command in ("portfolio", "evaluate", "evaluate-bundle"):
+        if args.command in ("portfolio", "evaluate", "evaluate-bundle", "performance"):
+            from orb.dashboard import build_dashboard_run
             extra = ({"data_label": args.data_label, "start_session": args.start_session,
-                      "end_session": args.end_session} if args.command in ("evaluate", "evaluate-bundle") else {})
+                      "end_session": args.end_session} if args.command in ("evaluate", "evaluate-bundle", "performance") else {})
             engine = {"evaluate": evaluate, "evaluate-bundle": evaluate_bundle,
-                      "portfolio": replay_portfolio}[args.command]
+                      "portfolio": replay_portfolio, "performance": build_dashboard_run}[args.command]
             result_dict = engine(
                 bars, args.initial_cash,
                 RiskLimits(args.risk_fraction, args.max_position_fraction, args.max_gross_fraction,
                            args.max_total_risk_fraction),
                 slippage_bps=args.slippage_bps, fee_per_share=args.fee_per_share,
                 daily_loss_fraction=args.daily_loss_fraction, **extra)
+            if args.command == 'performance':
+                from orb.performance import historical_performance
+                result_dict['import_context'] = {'synthetic': args.synthetic}
+                result_dict = historical_performance(result_dict)
         else:
             result_dict = (simulate(bars, ExecutionConfig(args.quantity, args.slippage_bps, args.fee_per_share))
                   if args.command == "simulate" else replay(bars)).to_dict()
         payload = json.dumps(result_dict, indent=2) + "\n"
-        report_path = args.report if args.command in ("evaluate", "evaluate-bundle") else None
+        report_path = args.report if args.command in ("evaluate", "evaluate-bundle", "performance") else None
         destinations = [p.resolve() for p in (args.output, report_path) if p is not None]
         if args.csv.resolve() in destinations:
             raise ValueError("output must not overwrite input CSV")
@@ -266,7 +273,11 @@ def main() -> None:
             args.output.write_text(payload, encoding="utf-8")
         if report_path:
             report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text(render_report(result_dict), encoding="utf-8")
+            if args.command == 'performance':
+                from orb.performance import render_performance
+                report_path.write_text(render_performance(result_dict), encoding="utf-8")
+            else:
+                report_path.write_text(render_report(result_dict), encoding="utf-8")
         print(payload, end="")
     except (ValueError, OSError) as exc:
         parser.exit(2, f"Replay error: {exc}\n")

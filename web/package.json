@@ -10,7 +10,8 @@
     "test:presets": "node tests/presets-browser.mjs",
     "test:research": "node tests/research-browser.mjs",
     "test:comparisons": "node tests/comparison-browser.mjs",
-    "test:paper": "node tests/paper-workspace.mjs"
+    "test:paper": "node tests/paper-workspace.mjs",
+    "test:performance": "node tests/performance-browser.mjs"
   },
   "dependencies": {
     "react": "19.3.1",
