@@ -8,6 +8,10 @@ account-session acceptance checklist, see
 An accurate [portfolio case study](docs/portfolio-case-study.md) separates shipped
 engineering from unverified broker operation and unestablished profitability.
 
+For a SPY-only historical rerun using an exact saved paper preset and explicit
+cost stress, see [SPY paper-preset study](docs/spy-paper-preset-study.md).
+This aligns scope/settings without claiming to reproduce broker fills.
+
 ## Status
 
 The implementation validates completed one-minute bars, calculates a 15-minute
