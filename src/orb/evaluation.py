@@ -45,18 +45,23 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
              data_label: str = "unspecified",
              start_session: date | None = None, end_session: date | None = None,
              entry_policy: EntryPolicy | None = None,
-             entry_caps: EntryCaps | None = None) -> dict:
+             entry_caps: EntryCaps | None = None,
+             symbols: tuple[str, ...] | None = None) -> dict:
     """Evaluate the fixed SPY/QQQ baseline; never treat absent bars as no trades.
 
     Without explicit date bounds, coverage spans observed New York dates only.
-    Calendar session coverage checks every regular-session minute for BOTH
-    symbols, independently of whether a candidate or a closed trade exists.
+    Calendar coverage checks both baseline symbols by default. Explicit study
+    scope may select SPY only; source identity still includes all supplied bars.
     """
     data = list(bars)
     if not data:
         raise ValueError("evaluation input contains no bars")
     if any(b.symbol not in ("SPY", "QQQ") for b in data):
         raise ValueError("baseline evaluation supports only SPY and QQQ")
+    scoped = symbols is not None
+    if scoped and (type(symbols) is not tuple or symbols not in (("SPY",), ("SPY", "QQQ"))):
+        raise ValueError('unsupported explicit evaluation scope')
+    selected_symbols = symbols if scoped else ('SPY', 'QQQ')
     if not data_label.strip():
         raise ValueError("data label must not be blank")
     if (start_session is None) != (end_session is None):
@@ -81,6 +86,10 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                                 **{name: Decimal(_decimal(getattr(b, name)))
                                    for name in ("open", "high", "low", "close")}) for b in data),
                        key=lambda b: (b.start, b.symbol))
+    if scoped and len({(b.symbol, b.start) for b in canonical}) != len(canonical):
+        raise ValueError('explicit scope requires unique source bars, including excluded symbols')
+    selected = [b for b in canonical if b.symbol in selected_symbols]
+    if not selected: raise ValueError('source contains no bars for the selected instrument scope')
     limits = limits or RiskLimits()
     initial_cash = Decimal(_decimal(initial_cash))
     slippage_bps = Decimal(_decimal(slippage_bps))
@@ -91,7 +100,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                            "max_total_risk_fraction")))
     caps = validate_caps(entry_caps)
     policy = resolve_policy(entry_policy)
-    result = replay_portfolio(canonical, initial_cash, limits,
+    result = replay_portfolio(selected, initial_cash, limits,
                               slippage_bps=slippage_bps, fee_per_share=fee_per_share,
                               daily_loss_fraction=daily_loss_fraction, entry_policy=policy, entry_caps=caps)
     dataset_rows = [[b.symbol, b.start.isoformat(),
@@ -104,7 +113,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
         session = exchange_session(day)
         if session is not None:
             expected = int((session.closes_at - session.opens_at).total_seconds() // 60)
-            for symbol in ("SPY", "QQQ"):
+            for symbol in selected_symbols:
                 stamps = [session.opens_at + timedelta(minutes=i) for i in range(expected)]
                 missing = [t for t in stamps if (symbol, t) not in keys]
                 coverage.append({"session": str(day), "symbol": symbol,
@@ -124,9 +133,9 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     if realised != Decimal(result["account"]["realized_pnl"]):
         raise ValueError("closed trade P&L disagrees with account ledger")
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
-    valuation = market_valuation(canonical, result, coverage)
+    valuation = market_valuation(selected, result, coverage)
     manifest = {
-        "schema_version": ("orb-evaluation-v7" if caps else
+        "schema_version": ("orb-evaluation-v8" if scoped else "orb-evaluation-v7" if caps else
                            "orb-evaluation-v5" if policy.is_reference else "orb-evaluation-v6"),
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
@@ -142,7 +151,7 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
                    "fee_per_share": _decimal(fee_per_share),
                    "start_session": str(start), "end_session": str(end),
                    "bounds_source": "explicit" if explicit else "observed_dates",
-                   "symbols": ["SPY", "QQQ"],
+                   "symbols": list(selected_symbols),
                    **({"entry_policy": policy.to_dict()} if caps or not policy.is_reference else {}),
                    **({"entry_caps": caps.to_dict()} if caps else {})},
         "engine": {"source_sha256": engine_fingerprint(),

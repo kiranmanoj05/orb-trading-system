@@ -459,6 +459,22 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         try: return research.get_run(run_id)
         except KeyError: raise HTTPException(404,'research run not found') from None
 
+    @app.post('/api/runs/{run_id}/paper-alignment')
+    async def paper_alignment(run_id: str, request: Request):
+        from orb.paper_alignment import from_run
+        p = await read_json(request, 4096)
+        try: original = research.get_run(run_id)
+        except KeyError: raise HTTPException(404, 'research run not found') from None
+        try:
+            if not isinstance(p,dict) or set(p) != {'preset_id','version'} or type(p['version']) is not int:
+                raise ValueError('exact saved preset required')
+            snapshot = store.get(p['preset_id'], p['version'])
+            return await run_in_threadpool(from_run, original, snapshot)
+        except PaperError as exc: raise HTTPException(422, str(exc)) from None
+        except KeyError: raise HTTPException(404, 'saved preset version not found') from None
+        except (ValueError, TypeError):
+            raise HTTPException(422, 'Study requires a paper-compatible preset and SPY source within 31 calendar dates.') from None
+
     @app.get('/api/runs/{run_id}/performance')
     async def performance_report(run_id: str, format: str = 'json'):
         from orb.performance import historical_performance, render_performance

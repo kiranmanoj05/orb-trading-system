@@ -7,6 +7,7 @@ import PaperEvidence from "./PaperEvidence";
 import ResearchJobs from "./ResearchJobs";
 import Comparisons from "./Comparisons";
 import Performance from "./Performance";
+import PaperAlignment from "./PaperAlignment";
 import CandleChart from "./CandleChart";
 import Appearance, { Logo } from "./Appearance";
 
@@ -1184,6 +1185,7 @@ function App() {
                     unverified.
                   </p>
                   <Performance key={run.evaluation_id} runId={run.evaluation_id} />
+                  <PaperAlignment key={'alignment-'+run.evaluation_id} runId={run.evaluation_id} />
                   <Pair
                     name="Costs / side"
                     value={`${config.slippage_bps} bps + ${config.fee_per_share} USD/share`}

@@ -145,8 +145,10 @@ row's evidence.
 Research and paper do not yet implement identical execution: the former can
 include SPY/QQQ and next-minute idealised fills; the latter is SPY-only with fresh
 quotes, marketable limits and broker brackets. An aggregate research report is
-not validation of the paper worker. Matching the instrument/configuration and
-execution assumptions remains required before a strategy-performance claim.
+not validation of the paper worker. The separate [SPY paper-preset study](spy-paper-preset-study.md)
+now matches instrument scope and an exact saved paper configuration, while
+explicitly retaining candle-fill versus quote/limit execution differences.
+Execution realism and prospective evidence remain required before a strategy-performance claim.
 
 For portfolio publication now, use the accurate case study in
 [portfolio-case-study.md](portfolio-case-study.md). Add numeric market results
