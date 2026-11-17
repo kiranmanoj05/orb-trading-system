@@ -11,6 +11,7 @@ from decimal import Decimal as D, localcontext
 from orb.dashboard import build_dashboard_run
 from orb.domain import Bar
 from orb.evaluation import _digest
+from orb.fill_assumptions import FillAssumptions
 from orb.paper_trading import PaperEngine
 from orb.performance import historical_performance
 from orb.profile_runs import validated_snapshot
@@ -34,13 +35,19 @@ def study(bars, preset, *, data_label='unspecified', start_session=None,
     dates = [b.start.astimezone(NEW_YORK).date() for b in data]
     start, end = start_session or min(dates), end_session or max(dates)
     if not 0 <= (end-start).days < MAX_DAYS: raise ValueError('study supports at most 31 calendar dates')
-    scenarios = [('Saved costs', D(0), D(0)), ('Additional stress', D('2'), D('.005'))]
+    # Prespecified independent questions; never search/select the best cell.
+    scenarios = [('Saved costs', D(0), D(0), None),
+                 ('Additional stress', D('2'), D('.005'), None),
+                 ('One-minute delay', D(0), D(0), FillAssumptions(1)),
+                 ('Delay and spread', D(0), D(0), FillAssumptions(1, D('4')))]
     rows = []
     dataset = None
-    for name, extra_bps, extra_fee in scenarios:
+    for name, extra_bps, extra_fee, assumptions in scenarios:
         costs = dict(slippage_bps=str(settings.slippage_bps+extra_bps),
                      fee_per_share=str(settings.fee_per_share+extra_fee))
-        row = dict(name=name, cost_assumptions=costs, state='unsupported_cost_settings',
+        execution = (assumptions or FillAssumptions()).to_dict()
+        row = dict(name=name, cost_assumptions=costs, fill_assumptions=execution,
+                   state='unsupported_cost_settings',
                    report=None, trades=None, coverage=None)
         try:
             effective = replace(settings, slippage_bps=D(costs['slippage_bps']), fee_per_share=D(costs['fee_per_share']))
@@ -48,16 +55,17 @@ def study(bars, preset, *, data_label='unspecified', start_session=None,
             rows.append(row)
             continue  # Keep a rejected stress cell; never clip or drop it.
         run = build_dashboard_run(data, data_label=data_label, start_session=start, end_session=end,
-                                  symbols=('SPY',), **effective.engine_kwargs())
+                                  symbols=('SPY',), fill_assumptions=assumptions, **effective.engine_kwargs())
         dataset = run['evidence']['manifest']['dataset']
         if expected_dataset_sha is not None and dataset['sha256'] != expected_dataset_sha:
             raise ValueError('study source identity changed')
-        trial = dict(schema_version='orb-paper-alignment-trial-v1', preset=snapshot,
+        trial = dict(schema_version='orb-paper-alignment-trial-v2', preset=snapshot,
                      costs=costs, parent_evaluation_id=parent_evaluation_id,
-                     scope=['SPY'], execution_model='idealised_next_minute_ohlcv_not_broker_limits')
+                     scope=['SPY'], fill_assumptions=execution,
+                     execution_model='idealised_delayed_open_ohlcv_not_broker_limits')
         manifest = run['evidence']['manifest']
         manifest['base_schema_version'] = manifest['schema_version']
-        manifest['schema_version'] = 'orb-evaluation-paper-alignment-v1'
+        manifest['schema_version'] = 'orb-evaluation-paper-alignment-v2'
         manifest['paper_alignment'] = deepcopy(trial)
         run['evaluation_id'] = run['evidence']['evaluation_id'] = _digest(manifest)
         run['applied_settings']['preset'] = deepcopy(snapshot)
@@ -69,22 +77,29 @@ def study(bars, preset, *, data_label='unspecified', start_session=None,
                    coverage=run['evidence']['coverage'])
         rows.append(row)
     eligible = all(r['state'] == 'complete' for r in rows)
+    cost_pair_eligible = all(r['state'] == 'complete' for r in rows[:2])
     with localcontext() as ctx:
         ctx.prec = 80
         delta = (str(D(rows[1]['report']['trade_statistics']['net_pnl_usd'])-
-                     D(rows[0]['report']['trade_statistics']['net_pnl_usd'])) if eligible else None)
-    result = dict(schema_version='orb-paper-alignment-v1', source_dataset=dataset,
+                     D(rows[0]['report']['trade_statistics']['net_pnl_usd'])) if cost_pair_eligible else None)
+        for row in rows:
+            row['delta_vs_saved_net_pnl_usd'] = (str(D(row['report']['trade_statistics']['net_pnl_usd'])-
+                D(rows[0]['report']['trade_statistics']['net_pnl_usd']))
+                if row['state'] == rows[0]['state'] == 'complete' else None)
+    result = dict(schema_version='orb-paper-alignment-v2', source_dataset=dataset,
         parent_evaluation_id=parent_evaluation_id, preset=snapshot, evaluated_symbols=['SPY'],
         excluded_source_symbols=sorted({b.symbol for b in data}-{'SPY'}),
         start_session=str(start), end_session=str(end), synthetic=synthetic,
         parameter_compatibility='worker_pure_validation_passed; feed_entitlement_not_checked',
-        trials=rows, all_trials_eligible=eligible,
+        trials=rows, all_trials_eligible=eligible, cost_pair_eligible=cost_pair_eligible,
         stress_delta_net_pnl_usd=delta,
         broker_execution_verified=False, profitability_established=False, recovery_clearance=False,
         limitations=[
-            'SPY scope and saved strategy/risk/cost settings are aligned; quote freshness, spreads, marketable limits, bracket activation, liquidity and cancel timing are not simulated.',
-            'Both cost cells rerun sizing, fills, targets and risk limits; the stress delta is not a fixed post-hoc fee subtraction and need not be monotone.',
+            'SPY scope and saved strategy/risk/cost settings are aligned; quote freshness, measured spreads, marketable limits, bracket activation, liquidity and cancel timing are not simulated.',
+            'All four cells rerun sizing, fills, targets and risk limits; deltas are not fixed post-hoc fee subtractions and need not be monotone.',
             'Additional stress is an assumed 2 bps per market side plus 0.005 USD per share per side, not measured broker fees or an optimised preset.',
+            'Delay cells wait one full minute after the normal entry boundary; the combined cell assumes a 4 bps full spread (2 bps per market side) added to saved slippage. Avoid double-counting if saved slippage already includes spread.',
+            'No order/reservation exists while waiting; sizing uses the delayed open and then-current account state. Waiting/entry gaps stay uncertain. Full fills and limit-target touches/gaps remain idealised, with no tick or partial-fill model.',
             'All source bars remain in the dataset identity; only SPY drives decisions, account valuation and completeness in this explicitly scoped study.',
             'Retrospective/unsealed research. Missing SPY minutes and unresolved outcomes withhold metrics; no signal is forced and no final holdout is created.',
             'Results are historical simulations, not Alpaca fills, account profit or permission to start/recover trading. Existing presets, runs and paper state are unchanged.',
@@ -110,10 +125,11 @@ def render_study(result):
         f"Preset: {preset['name']} v{preset['version']} ({preset['settings_sha256']})",
         f"Dates: {result['start_session']} to {result['end_session']}; synthetic: {result['synthetic']}",
         'Historical simulation only. Broker execution/profitability/recovery are not verified.', '',
-        '| Trial | State | Closed trades | Modelled net USD | Return fraction |', '| --- | --- | ---: | ---: | ---: |']
+        '| Trial | State | Delay minutes | Full spread bps | Closed trades | Modelled net USD | Delta vs saved USD | Return fraction |', '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |']
     for row in result['trials']:
         report=row['report']; s=report['trade_statistics'] if report else {}; m=report['engine_metrics'] if report else {}
-        lines.append(f"| {row['name']} | {row['state']} | {show(s.get('closed_trade_count'))} | {show(s.get('net_pnl_usd'))} | {show(m.get('total_return_fraction'))} |")
+        a=row['fill_assumptions']
+        lines.append(f"| {row['name']} | {row['state']} | {a['entry_delay_minutes']} | {a['spread_bps']} | {show(s.get('closed_trade_count'))} | {show(s.get('net_pnl_usd'))} | {show(row['delta_vs_saved_net_pnl_usd'])} | {show(m.get('total_return_fraction'))} |")
     lines += ['', f"Stress minus saved-cost net P&L (USD): {show(result['stress_delta_net_pnl_usd'])}", '',
               '## Limits', '']+['- '+v for v in result['limitations']]
     return '\n'.join(lines)+'\n'

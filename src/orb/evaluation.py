@@ -21,6 +21,7 @@ from orb.strategy import NEW_YORK
 from orb.valuation import market_valuation
 from orb.outcomes import outcome_class
 from orb.entry_policy import EntryPolicy, resolve_policy
+from orb.fill_assumptions import FillAssumptions, validate_fill_assumptions
 
 
 def _decimal(value: Decimal) -> str:
@@ -46,13 +47,15 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
              start_session: date | None = None, end_session: date | None = None,
              entry_policy: EntryPolicy | None = None,
              entry_caps: EntryCaps | None = None,
-             symbols: tuple[str, ...] | None = None) -> dict:
+             symbols: tuple[str, ...] | None = None,
+             fill_assumptions: FillAssumptions | None = None) -> dict:
     """Evaluate the fixed SPY/QQQ baseline; never treat absent bars as no trades.
 
     Without explicit date bounds, coverage spans observed New York dates only.
     Calendar coverage checks both baseline symbols by default. Explicit study
     scope may select SPY only; source identity still includes all supplied bars.
     """
+    fill_assumptions = validate_fill_assumptions(fill_assumptions)
     data = list(bars)
     if not data:
         raise ValueError("evaluation input contains no bars")
@@ -102,7 +105,8 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     policy = resolve_policy(entry_policy)
     result = replay_portfolio(selected, initial_cash, limits,
                               slippage_bps=slippage_bps, fee_per_share=fee_per_share,
-                              daily_loss_fraction=daily_loss_fraction, entry_policy=policy, entry_caps=caps)
+                              daily_loss_fraction=daily_loss_fraction, entry_policy=policy, entry_caps=caps,
+                              fill_assumptions=fill_assumptions)
     dataset_rows = [[b.symbol, b.start.isoformat(),
                      *(_decimal(p) for p in (b.open, b.high, b.low, b.close)), b.volume]
                     for b in canonical]
@@ -135,13 +139,16 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
     incomplete_sessions = sum(c["state"] != "complete" for c in coverage)
     valuation = market_valuation(selected, result, coverage)
     manifest = {
-        "schema_version": ("orb-evaluation-v8" if scoped else "orb-evaluation-v7" if caps else
+        "schema_version": ("orb-evaluation-v9" if fill_assumptions is not None else "orb-evaluation-v8" if scoped else "orb-evaluation-v7" if caps else
                            "orb-evaluation-v5" if policy.is_reference else "orb-evaluation-v6"),
         "dataset": {"sha256": _digest(dataset_rows), "bars": len(canonical),
                     "first_bar_at": canonical[0].start.isoformat(),
                     "last_bar_at": canonical[-1].start.isoformat(),
                     "label": data_label.strip(), "provenance_verified": False},
         "config": {"initial_cash": _decimal(initial_cash),
+                   **({'fill_assumptions': fill_assumptions.to_dict(),
+                       'effective_market_side_bps': _decimal(fill_assumptions.market_side_bps(slippage_bps))}
+                      if fill_assumptions is not None else {}),
                    "risk_fraction": _decimal(limits.risk_fraction),
                    "max_position_fraction": _decimal(limits.max_position_fraction),
                    "max_gross_fraction": _decimal(limits.max_gross_fraction),
@@ -191,7 +198,9 @@ def evaluate(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000"),
             "Stop-risk limits are admission controls, not guaranteed gap-loss ceilings or forced liquidation.",
             "Daily loss uses fixed opening equity and minute observations; loss/data gaps latch entry blocking only.",
             "Return and sampled drawdown are not calculated for incomplete coverage or outcomes.",
-            "Instantaneous full fills, stop-first intrabar ambiguity and no volume or settlement model.",
+            ("Declared delayed-open/spread sensitivity; full fills, unchanged limit-target touches, stop-first ambiguity, no volume or settlement model."
+             if fill_assumptions is not None else
+             "Instantaneous full fills, stop-first intrabar ambiguity and no volume or settlement model."),
         ],
     }
     return {"evaluation_id": _digest(manifest), "manifest": manifest,
@@ -219,6 +228,11 @@ def render_report(result: dict) -> str:
              f"Incomplete symbol/sessions: {s['incomplete_symbol_sessions']} / {s['expected_symbol_sessions']}", "",
              "| Candidate status | Count |", "| --- | ---: |"]
     lines += [f"| {state} | {count} |" for state, count in s["trade_status_counts"].items()]
+    if 'fill_assumptions' in m['config']:
+        a = m['config']['fill_assumptions']
+        lines += ['', f"Historical entry delay: {a['entry_delay_minutes']} minutes after the normal entry boundary.",
+                  f"Assumed full spread: {a['spread_bps']} bps; effective market-side cost: {m['config']['effective_market_side_bps']} bps.",
+                  'No order/reservation while waiting; missing waiting minutes stay uncertain. Limit targets remain idealised.']
     lines += ["", f"Closed-trade net P&L only (USD): {s['closed_subset']['net_pnl']}",
               f"Closed-trade win rate: {_percent(s['closed_subset']['win_fraction'])}"
               + (" (undefined: no closed trades)" if s['closed_subset']['win_fraction'] is None else ""),

@@ -154,3 +154,10 @@ For portfolio publication now, use the accurate case study in
 [portfolio-case-study.md](portfolio-case-study.md). Add numeric market results
 only after running a real archive. Synthetic verification belongs in engineering
 evidence and must never be shown as investment performance.
+
+The study now retains four prespecified cells: saved costs, additional costs,
+one-minute delayed entry, and delayed entry plus an assumed 4 bps full spread.
+Each reruns the engine, and only eligible pairs receive deltas. Spread is added
+to saved slippage; it is not measured from OHLCV. Full fills, limit-target touches
+and no pending reservation during the hypothetical delay remain assumptions.
+See the study's explicit execution contract before interpreting comparisons.

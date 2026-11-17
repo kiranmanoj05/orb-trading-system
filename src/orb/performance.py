@@ -61,6 +61,7 @@ def _benchmarks(run):
     with localcontext() as ctx:
         ctx.prec = 80
         capital, bps, fee = (D(config[k]) for k in ('initial_cash', 'slippage_bps', 'fee_per_share'))
+        bps = D(config.get('effective_market_side_bps', bps))
         for symbol in config['symbols']:
             candles = [c for c in run['candles'] if c['symbol'] == symbol]
             # Regular-session boundaries only; never substitute pre/postmarket bars.
@@ -79,7 +80,7 @@ def _benchmarks(run):
                            modelled_fees_usd=canonical(2*fee*quantity))
             out.append(row)
     return dict(cash_return_fraction='0', cash_assumptions='Zero interest and costs.',
-                passive=out, assumptions='Separate fully allocated account per symbol; first regular open to last regular close; same per-side slippage/fee assumptions, whole shares, uninvested cash earns zero. Price-only: no dividends, financing, settlement or corporate-action verification. Different exposure from ORB; not a combined portfolio or risk-matched comparison.')
+                passive=out, assumptions='Separate fully allocated account per symbol; first regular open to last regular close; same per-side slippage/fee assumptions (including half-spread when declared), whole shares, uninvested cash earns zero. No ORB entry delay is applied to passive open-to-close holding. Price-only: no dividends, financing, settlement or corporate-action verification. Different exposure from ORB; not a combined portfolio or risk-matched comparison.')
 
 
 def historical_performance(run):
@@ -144,5 +145,10 @@ def render_performance(r):
              '## Benchmarks', '', r['benchmarks']['assumptions'], '',
              '| Independent account | Price-only return fraction |', '| --- | ---: |', '| Cash, zero interest | 0 |']
     lines += [f"| {b['symbol']} | {show(b['return_fraction'])} |" for b in r['benchmarks']['passive']]
+    if 'fill_assumptions' in r['config']:
+        a = r['config']['fill_assumptions']
+        lines += ['', f"ORB delayed-open entry: {a['entry_delay_minutes']} minutes; assumed full spread: {a['spread_bps']} bps.",
+                  f"Effective cost per market side: {r['config']['effective_market_side_bps']} bps; limit targets unchanged.",
+                  'No order/reservation while waiting. These are sensitivity assumptions, not measured quotes or broker fills.']
     lines += ['', '## Limitations', ''] + ['- '+v for v in r['limitations']]
     return '\n'.join(lines)+'\n'

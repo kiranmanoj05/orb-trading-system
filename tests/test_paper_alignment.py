@@ -50,7 +50,7 @@ def test_both_cost_cells_recompute_exact_paper_settings_without_mutating_inputs(
     assert result['source_dataset']['sha256'] == source['evidence']['manifest']['dataset']['sha256']
     assert result['preset']['settings'] == snapshot['settings']
     assert result['evaluated_symbols'] == ['SPY'] and result['excluded_source_symbols'] == ['QQQ']
-    assert result['all_trials_eligible'] and len(result['trials']) == 2
+    assert result['all_trials_eligible'] and len(result['trials']) == 4
     for row in result['trials']:
         config = row['report']['config']
         assert config['symbols'] == ['SPY']
@@ -59,7 +59,7 @@ def test_both_cost_cells_recompute_exact_paper_settings_without_mutating_inputs(
         assert len(row['trades']) == 1 and row['trades'][0]['symbol'] == 'SPY'
         assert row['report']['synthetic'] and not row['report']['profitability_established']
         assert row['report']['applied_settings']['preset']['settings_sha256'] == snapshot['settings_sha256']
-    a,b = result['trials']
+    a,b = result['trials'][:2]
     assert b['report']['engine_metrics']['fees_paid_usd'] != a['report']['engine_metrics']['fees_paid_usd']
     assert D(result['stress_delta_net_pnl_usd']) == D(b['report']['trade_statistics']['net_pnl_usd'])-D(a['report']['trade_statistics']['net_pnl_usd'])
     assert not result['broker_execution_verified'] and not result['recovery_clearance']
@@ -92,10 +92,10 @@ def test_missing_spy_minutes_withhold_aggregates_even_when_qqq_is_complete():
     assert any(c['state'] != 'complete' for c in result['trials'][0]['coverage'])
 
 
-def test_known_no_entry_does_not_become_missing_evidence_or_a_closed_win():
+def test_immediate_known_no_entry_does_not_become_missing_evidence_or_a_closed_win():
     result = from_run(original('known_skip'),paper())
     assert result['all_trials_eligible']
-    for row in result['trials']:
+    for row in result['trials'][:2]:
         assert row['report']['trade_statistics']['closed_trade_count'] == 0
         assert row['report']['trade_statistics']['net_pnl_usd'] == '0'
         assert row['report']['trade_statistics']['win_fraction'] is None

@@ -42,19 +42,49 @@ The bounds are 20,000 source bars, 31 calendar dates and the import numeric
 range. Hashes establish identity, not provider authenticity or point-in-time
 availability. No provider acquisition or paid service is used.
 
-## Cost sensitivity
+## Prespecified cost and execution sensitivity
 
 | Cell | Assumptions |
 | --- | --- |
 | Saved costs | Exact saved per-market-side slippage and per-share/side fee |
 | Additional stress | Saved slippage +2 bps and saved fee +0.005 USD/share/side |
+| One-minute delay | Saved costs; entry one minute after the normal entry boundary |
+| Delay and spread | Same one-minute delay; assumed full spread of 4 bps, adding 2 bps per market side to saved slippage |
 
-Both cells rerun account sizing, fills, fill-based targets, exits, costs and risk
+All four cells rerun account sizing, fills, fill-based targets, exits, costs and risk
 gates. This is different from the paper cost report's post-hoc haircut on
 observed fills. Outcomes/deltas need not be monotone when fills/targets change.
 An override outside supported bounds remains a rejected cell, not a clipped or
-omitted trial; deltas are unavailable unless both cells are eligible. These are
+omitted trial; each delta versus Saved costs requires both compared cells to be
+eligible. The cost-stress delta separately requires the first two cells, while
+`all_trials_eligible` covers all four. These are
 declared assumptions, not actual broker fees, recommendations or selected winners.
+
+The signal and frozen range/stop are unchanged. A delayed hypothetical market
+entry is sized at its delayed open using the account state then available.
+No order, cash/risk reservation or protective stop exists during the waiting
+minute. Its high/low/close cannot decide whether to skip an earlier signal.
+Every waiting minute and the entry minute must exist: a gap yields uncertain
+`missing_entry_bar`, never a later convenient fill. A delayed boundary at or
+after the entry cutoff is a known `entry_cutoff` skip. A delayed open at/below
+the stop is a known no-entry. Missing coverage independently withholds metrics.
+
+Full spread means ask-minus-bid, expressed in bps around an assumed reference
+price; half is charged adversely per market side, **in addition** to saved
+slippage. Avoid double-counting if that slippage already represents spread.
+The same combined market-side cost reaches risk sizing and passive benchmarks;
+the latter retain their stated open-to-close holding interval without ORB delay.
+Limit targets still assume full fills at touches and favourable gaps. There is
+no tick rounding, measured quote, partial fill, queue or pending-limit model.
+One minute is a coarse stress assumption, not a measured worker latency.
+
+JSON study/trial schemas are now v2; explicit engine scenarios use
+`orb-fill-assumptions-v1` and evaluation v9. Dataset, preset, engine, scenarios
+and effective costs are frozen in report identities. Existing baseline calls
+keep their old schema/path semantics. Python callers may explicitly supply
+`FillAssumptions(entry_delay_minutes=0..5, spread_bps=Decimal('0'..'100'))` to
+`simulate`, `replay_portfolio` or `evaluate`; malformed assumptions are rejected.
+These are research scenarios, not saved-preset fields or paper-worker settings.
 
 ## CLI
 
@@ -74,8 +104,8 @@ required or read for this operation.
 
 ## Remaining acceptance
 
-Historical fills are still idealised completed-minute/next-open full fills with
-conservative intrabar ambiguity. Quotes, freshness/spread/marketable-limit tests,
+Historical fills are still idealised boundary-open full fills with
+conservative intrabar ambiguity. Quotes, freshness/measured-spread/marketable-limit tests,
 liquidity, partial bracket activation, cancellation timing and actual fees are
 not reproduced. Minute data does not establish executable or profitable returns.
 Real-data provenance, untouched chronological tests, fill/timing sensitivity,

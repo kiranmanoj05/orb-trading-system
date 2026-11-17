@@ -133,11 +133,18 @@ export default function PaperAlignment({ runId }: { runId: string }) {
                 {r.cost_assumptions.slippage_bps} bps +{" "}
                 {r.cost_assumptions.fee_per_share} USD/share per side
               </small>
+              <small>
+                Delay: {r.fill_assumptions.entry_delay_minutes} min · Full
+                spread: {r.fill_assumptions.spread_bps} bps
+                {" · "}Delta vs saved USD: {show(r.delta_vs_saved_net_pnl_usd)}
+              </small>
             </article>
           ))}
           <p className="caption">
-            Both cells rerun sizing and exits. Stress adds 2 bps and 0.005
-            USD/share per side; these are assumptions. No strategy is selected
+            Four cells rerun sizing and exits. Cost stress adds 2 bps and 0.005
+            USD/share per side. Delay waits one minute; combined spread adds 2
+            bps per market side. These are assumptions, not measured quotes. No
+            order or reservation exists while waiting. No strategy is selected
             or started.
           </p>
           <button onClick={download}>Download SPY study JSON</button>
