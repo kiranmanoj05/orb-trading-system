@@ -118,6 +118,23 @@ try {
   const file = await downloaded,
     report = JSON.parse(await readFile(await file.path(), "utf8"));
   assert.deepEqual(report, body);
+  assert.equal(report.schema_version, "orb-paper-alignment-v2");
+  assert.equal(report.trials.length, 4);
+  assert.equal(report.trials[2].fill_assumptions.entry_delay_minutes, 1);
+  assert.equal(report.trials[3].fill_assumptions.spread_bps, "4");
+  assert.equal(report.trials[3].report.config.effective_market_side_bps, "2");
+  assert.notEqual(
+    report.trials[0].trades[0].entry_at,
+    report.trials[2].trades[0].entry_at,
+  );
+  assert.match(
+    await page.locator(".paper-alignment").innerText(),
+    /Delay: 1 min/,
+  );
+  assert.match(
+    await page.locator(".paper-alignment").innerText(),
+    /Full spread: 4 bps/,
+  );
   assert(report.synthetic);
   assert(!report.profitability_established);
   assert(

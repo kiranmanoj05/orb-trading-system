@@ -14,6 +14,7 @@ from orb.session import exchange_session
 from orb.strategy import NEW_YORK
 from orb.entry_policy import EntryPolicy, resolve_policy
 from orb.simulation import ExecutionConfig, simulate
+from orb.fill_assumptions import FillAssumptions
 
 
 def _json(value):
@@ -51,7 +52,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                      fee_per_share: Decimal = Decimal("0"),
                      daily_loss_fraction: Decimal = Decimal("0.02"),
                      entry_policy: EntryPolicy | None = None,
-                     entry_caps: EntryCaps | None = None) -> dict:
+                     entry_caps: EntryCaps | None = None,
+                     fill_assumptions: FillAssumptions | None = None) -> dict:
     """Apply simulated events to one shared account without future funding.
 
     Fill paths are quantity-independent under the existing no-market-impact
@@ -71,7 +73,8 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     if daily_loss_fraction > 1:
         raise ValueError("daily loss fraction must be at most 1")
     account = AccountLedger(initial_cash, limits)
-    config = ExecutionConfig(1, slippage_bps, fee_per_share)
+    config = ExecutionConfig(1, slippage_bps, fee_per_share, fill_assumptions)
+    market_side_bps = (fill_assumptions or FillAssumptions()).market_side_bps(slippage_bps)
     data = list(bars)
     policy = resolve_policy(entry_policy)
     paths = simulate(data, config, entry_policy=policy)
@@ -166,7 +169,7 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
                 decision = None
             else:
                 decision = account.reserve(key, symbol, raw, path.stop,
-                                           slippage_bps=slippage_bps,
+                                           slippage_bps=market_side_bps,
                                            fee_per_share=fee_per_share, at=stamp, marks=marks)
                 reason = decision.reason
             quantity = decision.quantity if decision else 0
@@ -205,12 +208,14 @@ def replay_portfolio(bars: Iterable[Bar], initial_cash: Decimal = Decimal("10000
     for item in account.allocations:
         if item.state == "open":
             account.mark_unresolved(item.order_id)
-    return _json({"model_version": ("portfolio-entry-caps-v1" if caps else
+    return _json({"model_version": ("portfolio-fill-assumptions-v1" if fill_assumptions is not None else "portfolio-entry-caps-v1" if caps else
                                     "portfolio-session-loss-v3" if policy.is_reference else "portfolio-entry-policy-v1"),
                   **({"entry_capacity_final": (capacity_usage(account.allocations, filled_sessions, max(guards), caps)
                       if guards else None)} if caps else {}),
                   **({"entry_policy": policy.to_dict()} if not policy.is_reference else {}),
                   "config": {**({"entry_caps": caps.to_dict()} if caps else {}),
+                             **({'fill_assumptions': fill_assumptions.to_dict(),
+                                 'effective_market_side_bps': market_side_bps} if fill_assumptions is not None else {}),
                              "initial_cash": initial_cash, "limits": asdict(limits),
                              "slippage_bps": slippage_bps, "fee_per_share": fee_per_share,
                              "daily_loss_fraction": daily_loss_fraction,

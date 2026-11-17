@@ -9,7 +9,7 @@ An accurate [portfolio case study](docs/portfolio-case-study.md) separates shipp
 engineering from unverified broker operation and unestablished profitability.
 
 For a SPY-only historical rerun using an exact saved paper preset and explicit
-cost stress, see [SPY paper-preset study](docs/spy-paper-preset-study.md).
+cost, delayed-entry and spread sensitivity, see [SPY paper-preset study](docs/spy-paper-preset-study.md).
 This aligns scope/settings without claiming to reproduce broker fills.
 
 ## Status
