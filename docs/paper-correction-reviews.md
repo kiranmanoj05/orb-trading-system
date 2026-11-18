@@ -1,5 +1,11 @@
 # Correction review records
 
+> [Reviewed terminal retirement](reviewed-terminal-retirement.md) adds a separate
+> case-v3 action for eligible tracked intents. It changes local terminal state
+> and releases planned headroom atomically; all holds and Start blocks remain.
+> Existing keep-blocked, provider-review and accounting-only decisions retain
+> their original behaviour. New review bases also bind repeated order receipts.
+
 > New: [Reviewed terminal gross accounting](reviewed-terminal-accounting.md) adds
 > a narrowly validated `accept_terminal_accounting` disposition for new case-v2
 > records. It creates a separate reviewed gross estimate; all holds and execution

@@ -57,6 +57,14 @@ export default function PaperReview({
         </p>
       )}
       <p>Hold evidence: {review?.hold_history?.event_count ?? 0} event(s)</p>
+      {review?.terminal_retirement && (
+        <p className="warning">
+          Local terminal intent retired ·{" "}
+          {words(review.terminal_retirement.state)} ·{" "}
+          {review.terminal_retirement.retired_at}. Planned headroom released;
+          session entry remains consumed. Holds remain; trading stays blocked.
+        </p>
+      )}
       {(review?.hold_history?.legacy_history ||
         review?.hold_history?.incomplete) && (
         <p className="warning">
@@ -147,6 +155,48 @@ export default function PaperReview({
                   >
                     Accept reviewed terminal gross
                   </button>
+                </>
+              )}
+              {c.terminal_retirement && (
+                <>
+                  <p>
+                    Terminal intent:{" "}
+                    {words(c.terminal_retirement.reason || "unavailable")}
+                  </p>
+                  {c.terminal_retirement.eligible && (
+                    <>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={acknowledged === `retire:${c.case_id}`}
+                          onChange={(e) =>
+                            setAcknowledged(
+                              e.target.checked ? `retire:${c.case_id}` : "",
+                            )
+                          }
+                          disabled={busy || c.stale}
+                        />
+                        I accept this terminal reconstruction and local headroom
+                        release; holds remain and trading stays blocked.
+                      </label>
+                      <button
+                        disabled={
+                          busy ||
+                          c.stale ||
+                          acknowledged !== `retire:${c.case_id}`
+                        }
+                        onClick={() =>
+                          command("record", {
+                            case_id: c.case_id,
+                            fingerprint: c.fingerprint,
+                            disposition: "retire_terminal_intent",
+                          })
+                        }
+                      >
+                        Retire reviewed terminal intent
+                      </button>
+                    </>
+                  )}
                 </>
               )}
               <button

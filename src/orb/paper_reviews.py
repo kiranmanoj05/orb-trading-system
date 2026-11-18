@@ -8,7 +8,7 @@ from orb.paper_evidence import EvidenceError, digest, encoded, numeric, stamp, v
 TABLES = {'paper_hold_events', 'paper_review_log'}
 MAX_HOLDS = 10000
 MAX_REVIEWS = 2000
-DISPOSITIONS = {'keep_blocked', 'request_provider_review', 'accept_terminal_accounting'}
+DISPOSITIONS = {'keep_blocked', 'request_provider_review', 'accept_terminal_accounting', 'retire_terminal_intent'}
 
 
 class ReviewConflict(ValueError):
@@ -68,7 +68,10 @@ def basis(db, day):
     restart = PaperRestart(db).commitment()
     from orb.paper_cash import PaperCash
     cash = PaperCash(db).commitment()
-    return digest(dict(attempt=dict(attempt),marks=marks,holds=holds,meta=meta,fees=fees,admission=admission,management=management,restart=restart,cash=cash))
+    # A repeated identical order snapshot still advances last_seen_at. Bind
+    # that receipt too: it can be later than (or arrive during) the preflight.
+    heads=[tuple(r) for r in db.execute('SELECT * FROM paper_observation_heads WHERE day=? ORDER BY day',(day,))]
+    return digest(dict(attempt=dict(attempt),marks=marks,heads=heads,holds=holds,meta=meta,fees=fees,admission=admission,management=management,restart=restart,cash=cash))
 
 
 def capture_preflight(client, expected_scope):
@@ -128,10 +131,13 @@ class PaperReviews:
             current=basis(self.db,day)
             from orb.terminal_accounting import assess
             assessment = assess(self.db,day,preflight,started,at) if current==expected_basis else dict(eligible=False,reason='basis_changed_during_preflight')
-            value=dict(schema_version='orb-paper-review-case-v2',session=day,basis=expected_basis,
+            from orb.paper_retirement import assess as assess_retirement
+            retirement=assess_retirement(self.db,day,assessment) if current==expected_basis else dict(eligible=False,reason='basis_changed_during_preflight')
+            value=dict(schema_version='orb-paper-review-case-v3',session=day,basis=expected_basis,
                        stale_on_arrival=current!=expected_basis,preflight=preflight,
                        observed_from=started,observed_to=at,hold_history=self.hold_history(day),
-                       authority='review_only_holds_remain',fees_usd=None,net_pnl_usd=None,terminal_accounting=assessment)
+                       authority='review_only_holds_remain',fees_usd=None,net_pnl_usd=None,
+                       terminal_accounting=assessment,terminal_retirement=retirement)
             case_id=digest(value)
             self._append(day,'case',case_id,value,at)
             self.db.execute('COMMIT')
@@ -172,15 +178,32 @@ class PaperReviews:
                 if case['decision']['disposition']!=disposition:raise ReviewConflict('This case already has a different recorded decision.')
                 self.db.execute('COMMIT');return case
             if case['stale']:raise ReviewConflict('Review evidence changed or expired; prepare a new case.')
-            if disposition=='accept_terminal_accounting':
+            if disposition=='retire_terminal_intent':
+                from orb.paper_retirement import assess as assess_retirement
+                if (case.get('schema_version')!='orb-paper-review-case-v3'
+                        or not case.get('terminal_retirement',{}).get('eligible')
+                        or assess_retirement(self.db,case['session'],case['terminal_accounting'])!=case['terminal_retirement']):
+                    raise ReviewConflict('This case cannot retire the terminal intent; refresh evidence and prepare a new case.')
+            if disposition in ('accept_terminal_accounting','retire_terminal_intent'):
                 if not case.get('terminal_accounting',{}).get('eligible'):
                     raise ReviewConflict('This case does not support terminal accounting; refresh evidence and prepare a new case.')
                 accounting=dict(schema_version='orb-reviewed-terminal-accounting-v1',case_id=case_id,case_fingerprint=expected_fingerprint,
                     basis=case['basis'],accepted_at=now,assessment=case['terminal_accounting'],authority='accounting_only_holds_remain')
                 self._append(case['session'],'accounting',case_id,accounting,now)
-            value=dict(schema_version='orb-paper-review-decision-v2',case_id=case_id,case_fingerprint=expected_fingerprint,
+            if disposition=='retire_terminal_intent':
+                from orb.paper_admission import PaperAdmission
+                release=PaperAdmission(self.db)._release_terminal(case['session'],now,review=case)
+                if release is None: raise ReviewConflict('The terminal intent was already retired.')
+                retirement=dict(schema_version='orb-reviewed-terminal-retirement-v1',case_id=case_id,
+                    case_fingerprint=expected_fingerprint,basis_before=case['basis'],basis_after=basis(self.db,case['session']),
+                    retired_at=now,reservation_seq=release['reservation_seq'],release_seq=release['seq'],
+                    observation_seq=release['observation_seq'],authority='local_terminal_retirement_holds_remain',
+                    correction_clearance=False,restart_authority=False,fees_usd=None,net_pnl_usd=None)
+                self._append(case['session'],'retirement',case_id,retirement,now)
+            value=dict(schema_version='orb-paper-review-decision-v3' if disposition=='retire_terminal_intent' else 'orb-paper-review-decision-v2',case_id=case_id,case_fingerprint=expected_fingerprint,
                        disposition=disposition,recorded_at=now,authority='review_only_holds_remain')
             self._append(case['session'],'decision',case_id,value,now)
+            if disposition=='retire_terminal_intent': PaperAdmission(self.db).report()
             self.db.execute('COMMIT');return self.case(case_id,now)
         except BaseException:
             if self.db.in_transaction:self.db.execute('ROLLBACK')
@@ -190,13 +213,19 @@ class PaperReviews:
         rows=list(self.db.execute("SELECT case_id FROM paper_review_log WHERE day=? AND kind='case' ORDER BY seq DESC LIMIT 6",(day,)))
         accounting_row=self.db.execute("SELECT * FROM paper_review_log WHERE day=? AND kind='accounting' ORDER BY seq DESC LIMIT 1",(day,)).fetchone()
         accounting=None
+        retirement_row=self.db.execute("SELECT * FROM paper_review_log WHERE day=? AND kind='retirement' ORDER BY seq DESC LIMIT 1",(day,)).fetchone()
+        retirement=verified(retirement_row) if retirement_row else None
+        current_basis=basis(self.db,day) if retirement or accounting_row else None
         if accounting_row:
             value=verified(accounting_row)
-            current=value['basis']==basis(self.db,day)
-            accounting=dict(state='accepted_current_basis' if current else 'superseded_by_new_evidence',case_id=value['case_id'],
+            retired_current=bool(retirement and retirement['case_id']==value['case_id'] and retirement['basis_after']==current_basis)
+            current=value['basis']==current_basis or retired_current
+            accounting=dict(state='accepted_at_terminal_retirement' if retired_current else 'accepted_current_basis' if current else 'superseded_by_new_evidence',case_id=value['case_id'],
                 accepted_at=value['accepted_at'],gross_price_pnl_usd=value['assessment']['gross_price_pnl_usd'] if current else None,
                 fees_usd=None,net_pnl_usd=None,authority='accounting_only_holds_remain')
-        return dict(reviewed_accounting=accounting,hold_history=self.hold_history(day),cases=[self.case(r['case_id'],now) for r in rows[:5]],
+        return dict(reviewed_accounting=accounting,terminal_retirement=(dict(retirement,
+                    state='applied_holds_remain' if retirement['basis_after']==current_basis else 'applied_basis_changed') if retirement else None),
+                    hold_history=self.hold_history(day),cases=[self.case(r['case_id'],now) for r in rows[:5]],
                     cases_truncated=len(rows)>5,authority='review_only_holds_remain')
 
     def export(self,after=0,through=None,*,holds=False):
