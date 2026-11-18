@@ -12,7 +12,8 @@
     "test:comparisons": "node tests/comparison-browser.mjs",
     "test:paper": "node tests/paper-workspace.mjs",
     "test:performance": "node tests/performance-browser.mjs",
-    "test:alignment": "node tests/alignment-browser.mjs"
+    "test:alignment": "node tests/alignment-browser.mjs",
+    "test:retirement": "node tests/retirement-browser.mjs"
   },
   "dependencies": {
     "react": "19.3.1",

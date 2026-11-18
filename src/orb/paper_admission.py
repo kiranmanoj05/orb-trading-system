@@ -163,30 +163,42 @@ class PaperAdmission:
         try:
             self.report()
             if PaperEvidence(self.db).holds(): raise EvidenceError('admission_correction_hold')
-            row = self.db.execute('SELECT * FROM paper_attempts WHERE day=?',(day,)).fetchone()
-            if not row: raise EvidenceError('admission_missing_attempt')
-            if row['state']=='done': self.db.execute('COMMIT');return
-            h = self.db.execute('SELECT o.* FROM paper_observations o JOIN paper_observation_heads h ON h.seq=o.seq WHERE h.day=?',(day,)).fetchone()
-            proof = verified(h) if h else None
-            orders = proof['orders'] if proof else []
-            if (not orders or h['day'] != day or any(v['status'] not in TERMINAL or v['replaced'] for v in orders)
-                    or (proof['closing_expected'] and not any(v['role']=='closing_exit' for v in orders))
-                    or (Decimal(orders[0]['filled_quantity'])>0 and not proof['legs_complete'])
-                    or (orders[0]['status']=='filled' and orders[0]['quantity']!=orders[0]['filled_quantity'])
-                    or Decimal(orders[0]['filled_quantity']) != sum((Decimal(v['filled_quantity']) for v in orders[1:]),Decimal(0))):
-                raise EvidenceError('admission_terminal_proof_unavailable')
-            reservation = next((v for v in self.records() if v['session']==day and v['kind']=='reserved'),None)
-            if stamp(at) < h['observed_at'] or (reservation and stamp(at) < reservation['observed_at']):
-                raise EvidenceError('admission_release_clock_reversed')
-            value = dict(kind='terminal_release',session=day,reservation_seq=reservation['seq'] if reservation else None,
-                         legacy_untracked=reservation is None,observation_seq=h['seq'],observation_sha256=h['fingerprint'],
-                         request_sha256=digest(json.loads(row['request'])),preset_sha256=digest(json.loads(row['preset'])))
-            self._append(day,at,value)
-            self.db.execute("UPDATE paper_attempts SET state='done' WHERE day=?",(day,))
+            self._release_terminal(day,at)
             self.db.execute('COMMIT')
         except BaseException:
             if self.db.in_transaction: self.db.execute('ROLLBACK')
             raise
+
+    def _release_terminal(self, day, at, *, review=None):
+        """Internal transaction step; caller enforces ordinary or reviewed gates.
+
+        Only PaperReviews.record may supply a reviewed binding, in the same
+        transaction as its accounting, retirement and decision records.
+        """
+        if not self.db.in_transaction: raise EvidenceError('admission_transaction_required')
+        row = self.db.execute('SELECT * FROM paper_attempts WHERE day=?',(day,)).fetchone()
+        if not row: raise EvidenceError('admission_missing_attempt')
+        if row['state']=='done': return None
+        h = self.db.execute('SELECT o.* FROM paper_observations o JOIN paper_observation_heads h ON h.seq=o.seq WHERE h.day=?',(day,)).fetchone()
+        proof = verified(h) if h else None
+        orders = proof['orders'] if proof else []
+        if (not orders or h['day'] != day or any(v['status'] not in TERMINAL or v['replaced'] for v in orders)
+                or (proof['closing_expected'] and not any(v['role']=='closing_exit' for v in orders))
+                or (Decimal(orders[0]['filled_quantity'])>0 and not proof['legs_complete'])
+                or (orders[0]['status']=='filled' and orders[0]['quantity']!=orders[0]['filled_quantity'])
+                or Decimal(orders[0]['filled_quantity']) != sum((Decimal(v['filled_quantity']) for v in orders[1:]),Decimal(0))):
+            raise EvidenceError('admission_terminal_proof_unavailable')
+        reservation = next((v for v in self.records() if v['session']==day and v['kind']=='reserved'),None)
+        if stamp(at) < h['observed_at'] or (reservation and stamp(at) < reservation['observed_at']):
+            raise EvidenceError('admission_release_clock_reversed')
+        value = dict(kind='terminal_release',session=day,reservation_seq=reservation['seq'] if reservation else None,
+                     legacy_untracked=reservation is None,observation_seq=h['seq'],observation_sha256=h['fingerprint'],
+                     request_sha256=digest(json.loads(row['request'])),preset_sha256=digest(json.loads(row['preset'])))
+        if review is not None:
+            value.update(review_case_id=review['case_id'],review_case_fingerprint=review['fingerprint'])
+        self._append(day,at,value)
+        self.db.execute("UPDATE paper_attempts SET state='done' WHERE day=?",(day,))
+        return dict(value,seq=self.db.execute('SELECT MAX(seq) FROM paper_admission_log').fetchone()[0])
 
     def report(self):
         records = self.records()
@@ -208,6 +220,9 @@ class PaperAdmission:
                 if not proof or proof['day']!=r['session'] or proof['fingerprint']!=r['observation_sha256']:
                     raise EvidenceError('admission_release_proof_changed')
                 verified(proof)
+                if 'review_case_id' in r:
+                    from orb.paper_retirement import verify_release
+                    verify_release(self.db,r)
                 released.add(r['session'])
         active = []
         for day,r in reserved.items():

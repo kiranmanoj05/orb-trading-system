@@ -1,5 +1,10 @@
 # Reviewed terminal gross accounting
 
+> [Reviewed terminal retirement](reviewed-terminal-retirement.md) adds a separate
+> case-v3 decision for eligible tracked pending intents. It atomically retires
+> local state and planned headroom while all holds and trading blocks remain.
+> Accounting-only acceptance described here is unchanged.
+
 A held attempt can now produce a **separate, manually accepted terminal gross
 estimate** when its retained order and FILL evidence agrees under a narrow policy.
 This is accounting review, not correction clearance or permission to trade.

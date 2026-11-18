@@ -26,7 +26,7 @@ observations, explicit incomplete outcomes, gross-only closed estimates and
 persistent correction holds.
 Read-only [fill activity history](docs/paper-fill-activities.md) adds individual
 reported fills, explicit quantity mismatches and separate gross estimates;
-fees/net P&L and reviewed correction resolution remain unavailable.
+fees/net P&L and account-wide correction clearance remain unavailable.
 Held attempts now support [evidence-bound review records](docs/paper-correction-reviews.md)
 with read-only account preflight and append-only decisions; reviews keep holds
 and automatic actions blocked.
@@ -34,6 +34,9 @@ Eligible price/time corrections can now receive a separate
 [reviewed terminal gross estimate](docs/reviewed-terminal-accounting.md), with
 immutable source selection and exact quantity/notional/time checks. This does
 not clear holds or establish fees, net P&L or execution permission.
+Eligible tracked attempts can now [retire a reviewed terminal intent](docs/reviewed-terminal-retirement.md)
+with atomic accounting, local state and planned-headroom release. All correction
+holds, consumed session entries and daily-loss gates remain; Start stays blocked.
 Read-only [account fee evidence](docs/paper-account-fees.md) now retains signed
 FEE records, scan receipts and revisions, with explicit unknown attribution and
 sticky account correction gates. These records do not establish per-trade costs

@@ -748,6 +748,9 @@ class PaperEngine:
     def record_review(self, case_id, fingerprint, disposition):
         with self.lock, self.evidence_write_lease():
             PaperReviews(self.db).record(case_id,fingerprint,disposition,self.review_clock().isoformat())
+            if disposition=='retire_terminal_intent':
+                self.enabled=False;self.restart_required=True;self.restart_blocked=True
+                self.message='Reviewed terminal intent retired locally. Correction holds remain; automatic actions stay blocked.'
             return self.evidence.report()
 
     def review_events(self, after=0, through=None, holds=False):

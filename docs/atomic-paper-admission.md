@@ -1,5 +1,11 @@
 # Atomic paper admission
 
+> [Reviewed terminal retirement](reviewed-terminal-retirement.md) now permits
+> one narrowly reviewed release while a correction hold remains. It requires
+> exact terminal accounting plus tracked native intent evidence and records
+> accounting/release/retirement/decision atomically. The ordinary worker release
+> path below still refuses every hold; no automatic recovery authority is added.
+
 The native SPY paper worker now commits its entry intent and planned risk
 reservation in one SQLite transaction. This is actual worker integration, not a
 new research simulator or a permission to clear correction holds.
