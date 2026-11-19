@@ -12,7 +12,10 @@ from test_paper_trading import NOW
 from orb.dashboard_api import create_app
 
 root=Path(sys.argv[1])
-engine,path=ready(root)
+if len(sys.argv)>2 and sys.argv[2]=='management':
+    from test_management_resolution import ready as managed
+    engine,_,path=managed(root)
+else:engine,path=ready(root)
 engine.close()
 app=create_app(port=8892,web_dir=Path(__file__).resolve().parents[1]/"build",paper_db=path,preset_db=root/'presets.sqlite',research_db=root/'research.sqlite',data_dir=root/'data')
 app.state.paper_engine.client=ReadOnly()  # asserts GET; cannot submit/cancel

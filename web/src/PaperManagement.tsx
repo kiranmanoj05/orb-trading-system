@@ -38,7 +38,17 @@ export default function PaperManagement({
                   still requires order evidence.
                 </p>
               )}
-              {r.state.includes("unknown") && (
+              {r.terminal_resolution && (
+                <p className="warning">
+                  Reviewed terminal history ·{" "}
+                  {r.terminal_resolution.command_count} command(s),{" "}
+                  {r.terminal_resolution.unknown_transport_count} with
+                  unconfirmed transport. Recorded transport:{" "}
+                  {words(r.transport_state)}. Holds remain; no resend or resume
+                  authority.
+                </p>
+              )}
+              {(r.transport_state || r.state).includes("unknown") && (
                 <p className="warning">
                   Outcome unknown. Inspect broker orders; this command will not
                   be sent again automatically.

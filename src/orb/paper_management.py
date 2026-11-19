@@ -284,12 +284,15 @@ class PaperManagement:
             close=next((v for v in intents.values() if v['session']==day and v['kind']=='close_intent'),None)
             canceled=[v for v in intents.values() if v['session']==day and v['kind']=='cancel_intent']
             receipt=dispatches.get(close['seq']) if close else (dispatches.get(canceled[-1]['seq']) if canceled else None)
-            state=('terminal_reported' if attempts[day]['state']=='done' else
-                   'closing_outcome_unknown' if close and (receipt is None or receipt['outcome']=='outcome_unknown') else
+            transport_state=('closing_outcome_unknown' if close and (receipt is None or receipt['outcome']=='outcome_unknown') else
                    ('closing_response_observed' if receipt.get('response') is not None else 'closing_returned_unverified') if close else
                    r['preflight']['state'] if r['kind']=='close_check' else
                    'cancellation_outcome_unknown' if canceled and (receipt is None or receipt['outcome']=='outcome_unknown') else 'cancellation_requested_unconfirmed')
+            from orb.management_resolution import projection
+            resolution=projection(self.db,day)
+            state=('reviewed_terminal_history' if resolution else 'terminal_reported' if attempts[day]['state']=='done' else transport_state)
             rows.append(dict(session=day,state=state,quantity=close['quantity'] if close else None,observed_at=r['observed_at'],
+                             **({'transport_state':transport_state,'terminal_resolution':resolution} if resolution else {}),
                              cancel_target_count=sum(len(v['targets']) for v in canceled),receipt=receipt,
                              preflight=close['preflight'] if close else r.get('preflight')))
         legacy=[day for day,row in attempts.items() if row['closing'] and not any(v['kind']=='close_intent' and v['session']==day for v in intents.values())]

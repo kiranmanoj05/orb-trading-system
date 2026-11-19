@@ -1,5 +1,10 @@
 # Reviewed terminal intent retirement
 
+> [Reviewed terminal command history](reviewed-management-retirement.md) now
+> extends this action to exactly accounted native cancel/close history in
+> case-v4. Original receipts remain unchanged and all holds remain. Earlier
+> case-v3 retirement without command history keeps its existing contract.
+
 Trades → Saved ORB attempts → Correction review can now **Retire reviewed
 terminal intent** for a narrowly supported held attempt. It atomically accepts
 the exact terminal gross reconstruction, marks the local intent `done`, releases
@@ -27,11 +32,12 @@ Retirement additionally requires:
 - A tracked native reservation bound to the unchanged request and saved preset.
   Legacy untracked amounts remain unknown and cannot use this action.
 - A pending local attempt. Already completed attempts are not released twice.
-- No explicit closing intent or management-command/check history for this
-  session. Cancel/close uncertainty requires a separate recovery protocol; the
-  action does not discard command outcomes simply because inventory is flat.
-- A fresh case-v3 record and exact fingerprint. Older case contracts cannot
-  acquire this new authority. Changed evidence/metadata or an expired/future
+- Either no management history (the original pathway), or exact accounted
+  native cancel/close/check history under the case-v4 contract linked above.
+  The action never discards command outcomes merely because inventory is flat.
+- A fresh supported case and exact fingerprint: case-v4 for command history;
+  prior case-v3 without commands retains its existing authority. Older contracts
+  cannot acquire the new command-review authority. Changed evidence/metadata or an expired/future
   review refuses the action. Cases remain valid for at most two minutes.
 
 Review bases now include observation-head receipts (`last_seen_at`) as well as
@@ -85,7 +91,7 @@ their edit/save/duplicate/reset/version workflows are unchanged.
 This is explicit local user acceptance, not authenticated independent review or
 provider certification. Hashes/triggers detect local inconsistency; they do not
 defend against a database owner rewriting all evidence and hashes. Corrected
-terminal retirement does not repair quantity busts, replacements, uncertain
+terminal retirement does not repair quantity busts, replacements, unmatched
 management commands, actual fee attribution, broker net P&L, account-wide
 correction clearance or prospective provider acceptance. Those remain separate
 work. No live-money orders, paid services or exposed credentials are involved.

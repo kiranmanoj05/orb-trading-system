@@ -163,6 +163,22 @@ export default function PaperReview({
                     Terminal intent:{" "}
                     {words(c.terminal_retirement.reason || "unavailable")}
                   </p>
+                  {c.terminal_retirement.management_resolution && (
+                    <p>
+                      Command history:{" "}
+                      {words(
+                        c.terminal_retirement.management_resolution.reason,
+                      )}
+                      .{" "}
+                      {c.terminal_retirement.management_resolution
+                        .command_count ?? "Unavailable"}{" "}
+                      command(s),{" "}
+                      {c.terminal_retirement.management_resolution
+                        .unknown_transport_count ?? "Unavailable"}{" "}
+                      with unconfirmed transport. Unknown outcomes stay unknown;
+                      no resend or hold clearance.
+                    </p>
+                  )}
                   {c.terminal_retirement.eligible && (
                     <>
                       <label>

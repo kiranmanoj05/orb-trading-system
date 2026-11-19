@@ -1,5 +1,9 @@
 # Durable paper order management
 
+> [Reviewed terminal command history](reviewed-management-retirement.md) can now
+> support local retirement of eligible held attempts. It preserves the original
+> transport outcomes and all holds; no automatic resend or resume is granted.
+
 The native SPY worker now journals cancellation and residual-closing commands
 before dispatch. This extends atomic entry admission/terminal release into the
 actual management paths. It adds no manual cancel, flatten, retry or hold-clear
