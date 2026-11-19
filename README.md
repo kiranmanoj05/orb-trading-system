@@ -37,6 +37,9 @@ not clear holds or establish fees, net P&L or execution permission.
 Eligible tracked attempts can now [retire a reviewed terminal intent](docs/reviewed-terminal-retirement.md)
 with atomic accounting, local state and planned-headroom release. All correction
 holds, consumed session entries and daily-loss gates remain; Start stays blocked.
+Supported [native command history](docs/reviewed-management-retirement.md) can now
+be accounted for by exact later terminal evidence during that atomic retirement.
+Unknown transport outcomes remain unknown; no commands are replayed.
 Read-only [account fee evidence](docs/paper-account-fees.md) now retains signed
 FEE records, scan receipts and revisions, with explicit unknown attribution and
 sticky account correction gates. These records do not establish per-trade costs

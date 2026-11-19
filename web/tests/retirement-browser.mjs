@@ -6,11 +6,13 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 const root = fileURLToPath(new URL("../..", import.meta.url));
+const managed = process.argv.includes("--management");
+const failStatus = process.argv.includes("--status-failure");
 const temp = await mkdtemp(tmpdir() + "/orb-retirement-"),
   base = "http://127.0.0.1:8892";
 const server = spawn(
   process.env.ORB_PYTHON || "python3",
-  ["web/tests/retirement_server.py", temp],
+  ["web/tests/retirement_server.py", temp, ...(managed ? ["management"] : [])],
   {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
@@ -67,6 +69,7 @@ try {
       },
     }),
   );
+  if (managed) await page.clock.install();
   await page.goto(base);
   await page.getByRole("button", { name: /^Trades/ }).click();
   const journal = page.getByRole("region", {
@@ -126,11 +129,57 @@ try {
     "PASS refused retirement leaves reservation intact and resets acknowledgement",
   );
   await acknowledgement.check();
+  let releaseOld, oldArrived;
+  const oldGate = new Promise((r) => (releaseOld = r));
+  const arrived = new Promise((r) => (oldArrived = r));
+  if (managed && !failStatus) {
+    await page.route(
+      "**/api/paper/status",
+      async (route) => {
+        const response = await route.fetch();
+        oldArrived();
+        await oldGate;
+        await route.fulfill({ response });
+      },
+      { times: 1 },
+    );
+    await page.clock.runFor(15000);
+    await arrived;
+  }
+  if (failStatus)
+    await page.route(
+      "**/api/paper/status",
+      (route) =>
+        route.fulfill({
+          status: 503,
+          json: { detail: "Status unavailable after saved retirement." },
+        }),
+      { times: 1 },
+    );
+  const freshStatus = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/paper/status") &&
+      r.status() === (failStatus ? 503 : 200),
+  );
   const response = page.waitForResponse(
     (r) => r.url().endsWith("/api/paper/reviews/record") && r.status() === 200,
   );
   await button.click();
   const evidence = await (await response).json();
+  await freshStatus;
+  if (managed && !failStatus) {
+    const oldResponse = page.waitForResponse((r) =>
+      r.url().endsWith("/api/paper/status"),
+    );
+    releaseOld();
+    await oldResponse;
+    await page.evaluate(
+      () =>
+        new Promise((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(r)),
+        ),
+    );
+  }
   await journal.getByText(/Local terminal intent retired/).waitFor();
   assert(evidence.entries_blocked);
   const current = await (await fetch(base + "/api/paper/status")).json();
@@ -153,6 +202,43 @@ try {
   const file = await download,
     exported = JSON.parse(await readFile(await file.path(), "utf8"));
   assert(exported.correction_reviews.some((r) => r.kind === "retirement"));
+  if (managed) {
+    const resolution = exported.correction_reviews.find(
+      (r) => r.kind === "management_resolution",
+    );
+    assert.equal(resolution.record.assessment.command_count, 2);
+    assert.equal(resolution.record.assessment.unknown_transport_count, 2);
+    assert.equal(resolution.record.retry_authority, false);
+    await page
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    if (failStatus) {
+      await page.getByText("Saved entry risk", { exact: true }).click();
+      await page
+        .getByText("Admission evidence unavailable.", { exact: true })
+        .waitFor();
+      const nextStatus = page.waitForResponse(
+        (r) => r.url().endsWith("/api/paper/status") && r.status() === 200,
+      );
+      await page.clock.runFor(15000);
+      await nextStatus;
+      await page.getByText(/Pending reservations: 0/).waitFor();
+    }
+    await page.getByText("Saved order actions", { exact: true }).click();
+    await page
+      .getByText(/Recorded transport: closing outcome unknown/)
+      .waitFor();
+    assert.match(
+      await page.locator(".settings-view").innerText(),
+      /reviewed terminal history/,
+    );
+    console.log(
+      failStatus
+        ? "PASS failed status withholds derived risk until a fresh poll restores reviewed history"
+        : "PASS delayed status cannot overwrite reviewed command history or turn unknown transport into confirmation",
+    );
+  }
   assert(
     exported.admission_history.some(
       (r) => r.kind === "terminal_release" && r.review_case_id,

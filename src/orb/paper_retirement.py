@@ -12,15 +12,17 @@ def assess(db, day, terminal):
     admission.report()  # Validate existing releases and frozen intent bindings.
     row = db.execute('SELECT * FROM paper_attempts WHERE day=?',(day,)).fetchone()
     if row['state']=='done': return refuse('intent_already_terminal')
-    if row['closing'] is not None: return refuse('closing_intent_requires_separate_recovery')
     from orb.paper_management import PaperManagement
     management = PaperManagement(db)
     management.report()
-    if any(r['session']==day for r in management.records()):
-        return refuse('management_history_requires_separate_recovery')
+    from orb.management_resolution import assess as assess_management
+    resolution=assess_management(db,row,terminal,[r for r in management.records() if r['session']==day])
+    if resolution is not None and not resolution['eligible']:
+        return dict(refuse(resolution['reason']),management_resolution=resolution)
     reservation = next((r for r in admission.records() if r['session']==day and r['kind']=='reserved'),None)
     if reservation is None: return refuse('legacy_untracked_reservation')
-    return dict(out,eligible=True,reason='reviewed_terminal_intent_can_retire',reservation_seq=reservation['seq'])
+    return dict(out,eligible=True,reason='reviewed_terminal_intent_can_retire',reservation_seq=reservation['seq'],
+                **(dict(schema_version='orb-terminal-retirement-assessment-v2',management_resolution=resolution) if resolution is not None else {}))
 
 
 def verify_release(db, release):
@@ -38,7 +40,7 @@ def verify_release(db, release):
         if kind=='case' and row['fingerprint']!=release['review_case_fingerprint']:
             raise EvidenceError('retirement_review_integrity_failed')
     case,accounting,retirement,decision=(records[k] for k in ('case','accounting','retirement','decision'))
-    if (case.get('schema_version')!='orb-paper-review-case-v3'
+    if (case.get('schema_version') not in ('orb-paper-review-case-v3','orb-paper-review-case-v4')
             or not case.get('terminal_retirement',{}).get('eligible')
             or case['terminal_retirement'].get('reservation_seq')!=release['reservation_seq']
             or accounting.get('case_fingerprint')!=release['review_case_fingerprint']
@@ -55,3 +57,5 @@ def verify_release(db, release):
             or retirement.get('retired_at')!=release['observed_at']
             or decision.get('case_fingerprint')!=release['review_case_fingerprint']):
         raise EvidenceError('retirement_review_integrity_failed')
+    from orb.management_resolution import verify as verify_management
+    verify_management(db,case,retirement,release)

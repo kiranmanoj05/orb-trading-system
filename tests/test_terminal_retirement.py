@@ -135,7 +135,7 @@ def test_unsupported_recovery_remains_explicit_and_cannot_retire(tmp_path,kind):
     elif kind=='already_done':retire(e,prepare(e))
     c=prepare(e);assert not c['terminal_retirement']['eligible']
     if kind=='legacy':assert c['terminal_retirement']['reason']=='legacy_untracked_reservation'
-    if kind=='management':assert c['terminal_retirement']['reason']=='management_history_requires_separate_recovery'
+    if kind=='management':assert c['terminal_retirement']['reason']=='management_observed_after_terminal'
     if kind=='already_done':assert c['terminal_retirement']['reason']=='intent_already_terminal'
     before=frozen(e)
     with pytest.raises(ReviewConflict,match='cannot retire'):retire(e,c)

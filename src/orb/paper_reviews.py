@@ -133,7 +133,7 @@ class PaperReviews:
             assessment = assess(self.db,day,preflight,started,at) if current==expected_basis else dict(eligible=False,reason='basis_changed_during_preflight')
             from orb.paper_retirement import assess as assess_retirement
             retirement=assess_retirement(self.db,day,assessment) if current==expected_basis else dict(eligible=False,reason='basis_changed_during_preflight')
-            value=dict(schema_version='orb-paper-review-case-v3',session=day,basis=expected_basis,
+            value=dict(schema_version='orb-paper-review-case-v4',session=day,basis=expected_basis,
                        stale_on_arrival=current!=expected_basis,preflight=preflight,
                        observed_from=started,observed_to=at,hold_history=self.hold_history(day),
                        authority='review_only_holds_remain',fees_usd=None,net_pnl_usd=None,
@@ -180,7 +180,9 @@ class PaperReviews:
             if case['stale']:raise ReviewConflict('Review evidence changed or expired; prepare a new case.')
             if disposition=='retire_terminal_intent':
                 from orb.paper_retirement import assess as assess_retirement
-                if (case.get('schema_version')!='orb-paper-review-case-v3'
+                if (case.get('schema_version') not in ('orb-paper-review-case-v3','orb-paper-review-case-v4')
+                        or (case.get('terminal_retirement',{}).get('management_resolution') is not None
+                            and case.get('schema_version')!='orb-paper-review-case-v4')
                         or not case.get('terminal_retirement',{}).get('eligible')
                         or assess_retirement(self.db,case['session'],case['terminal_accounting'])!=case['terminal_retirement']):
                     raise ReviewConflict('This case cannot retire the terminal intent; refresh evidence and prepare a new case.')
@@ -191,6 +193,12 @@ class PaperReviews:
                     basis=case['basis'],accepted_at=now,assessment=case['terminal_accounting'],authority='accounting_only_holds_remain')
                 self._append(case['session'],'accounting',case_id,accounting,now)
             if disposition=='retire_terminal_intent':
+                resolution=case['terminal_retirement'].get('management_resolution')
+                if resolution is not None:
+                    management=dict(schema_version='orb-reviewed-management-terminal-v1',case_id=case_id,
+                        case_fingerprint=expected_fingerprint,accepted_at=now,assessment=resolution,
+                        authority='local_terminal_history_only',retry_authority=False,correction_clearance=False)
+                    self._append(case['session'],'management_resolution',case_id,management,now)
                 from orb.paper_admission import PaperAdmission
                 release=PaperAdmission(self.db)._release_terminal(case['session'],now,review=case)
                 if release is None: raise ReviewConflict('The terminal intent was already retired.')
@@ -199,6 +207,7 @@ class PaperReviews:
                     retired_at=now,reservation_seq=release['reservation_seq'],release_seq=release['seq'],
                     observation_seq=release['observation_seq'],authority='local_terminal_retirement_holds_remain',
                     correction_clearance=False,restart_authority=False,fees_usd=None,net_pnl_usd=None)
+                if resolution is not None:retirement['management_resolution_sha256']=digest(management)
                 self._append(case['session'],'retirement',case_id,retirement,now)
             value=dict(schema_version='orb-paper-review-decision-v3' if disposition=='retire_terminal_intent' else 'orb-paper-review-decision-v2',case_id=case_id,case_fingerprint=expected_fingerprint,
                        disposition=disposition,recorded_at=now,authority='review_only_holds_remain')

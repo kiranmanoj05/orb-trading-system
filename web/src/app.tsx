@@ -344,6 +344,7 @@ function Modal({
 }
 function App() {
   const pendingView = useRef<{ symbol: string; session: string } | null>(null);
+  const paperStatusEpoch = useRef(0);
   const [runs, setRuns] = useState<Listing[]>([]),
     [paperState, setPaperState] = useState<Row | null>(null),
     [id, setId] = useState(""),
@@ -397,16 +398,19 @@ function App() {
   }
   useEffect(() => {
     let live = true;
-    const poll = () =>
-      api("/api/paper/status")
+    const poll = () => {
+      const epoch = ++paperStatusEpoch.current;
+      return api("/api/paper/status")
         .then((v) => {
-          if (live) setPaperState(v);
+          if (live && epoch === paperStatusEpoch.current) setPaperState(v);
         })
         .catch(() => {});
+    };
     poll();
     const timer = setInterval(poll, 15000);
     return () => {
       live = false;
+      paperStatusEpoch.current++;
       clearInterval(timer);
     };
   }, []);
@@ -607,6 +611,7 @@ function App() {
             <PaperControls
               status={paperState}
               changed={(s) => {
+                paperStatusEpoch.current++;
                 setPaperState({ ...s, available: true });
                 setMode("paper");
               }}
@@ -967,13 +972,39 @@ function App() {
               <>
                 <PaperEvidence
                   report={paperState?.evidence}
-                  changed={(value) =>
+                  changed={(value) => {
+                    const epoch = ++paperStatusEpoch.current;
+                    const retired = value.attempts?.some(
+                      (a: Row) => a.correction_review?.terminal_retirement,
+                    );
                     setPaperState((old) => ({
                       ...old,
                       evidence: value,
                       enabled: value.entries_blocked ? false : old?.enabled,
-                    }))
-                  }
+                      ...(retired
+                        ? {
+                            admission: null,
+                            management: null,
+                            restart: null,
+                            cash_bridge: null,
+                          }
+                        : {}),
+                    }));
+                    if (retired)
+                      api("/api/paper/status")
+                        .then((s) => {
+                          if (epoch === paperStatusEpoch.current)
+                            setPaperState(s);
+                        })
+                        .catch(() => {
+                          if (epoch === paperStatusEpoch.current)
+                            setPaperState((old) => ({
+                              ...old,
+                              message:
+                                "Local retirement saved. Status refresh unavailable; derived risk and recovery views are unavailable.",
+                            }));
+                        });
+                  }}
                 />
                 <p className="drawer-note">
                   Latest account orders (ORB attribution unknown) and cumulative
@@ -1184,8 +1215,14 @@ function App() {
                     Provider authenticity and point-in-time availability remain
                     unverified.
                   </p>
-                  <Performance key={run.evaluation_id} runId={run.evaluation_id} />
-                  <PaperAlignment key={'alignment-'+run.evaluation_id} runId={run.evaluation_id} />
+                  <Performance
+                    key={run.evaluation_id}
+                    runId={run.evaluation_id}
+                  />
+                  <PaperAlignment
+                    key={"alignment-" + run.evaluation_id}
+                    runId={run.evaluation_id}
+                  />
                   <Pair
                     name="Costs / side"
                     value={`${config.slippage_bps} bps + ${config.fee_per_share} USD/share`}
