@@ -125,9 +125,9 @@ Never send keys to chat or include them in portfolio screenshots.
 6. Separately rehearse restart with injected responses before using it around an
    actual open paper position. Preserve uncertain outcomes; never force a retry.
 
-For Monday 16 November 2026, the normal US equity open is 14:30 London and the
-opening range ends at 14:45 London. Confirm the broker clock/calendar at runtime;
-an exchange halt or account restriction can still prevent a trade.
+Use New York exchange time and confirm the broker clock/calendar at runtime.
+London offsets change around daylight-saving transitions; do not reuse a dated
+local-time conversion. A halt or account restriction can still prevent a trade.
 
 ## Portfolio acceptance and remaining evidence
 

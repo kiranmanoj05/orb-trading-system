@@ -91,6 +91,9 @@ python -m orb account-demo
 
 ## Local dashboard
 
+For the frozen release scope, remaining acceptance gaps and VS Code launch
+instructions, see [final acceptance](docs/final-acceptance.md).
+
 The React/TypeScript historical viewer is backed by a loopback-only FastAPI
 service and the existing Python evaluator. It displays candle/range/fill/exit
 evidence, decision reasons, immutable applied settings, cash/commitments,
