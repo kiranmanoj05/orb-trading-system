@@ -243,7 +243,7 @@ class PaperAdmission:
             anchor_equity_usd=self._meta('equity:'+day) if day else None,loss_budget_usd=self._meta('loss-budget:'+day) if day else None,
             daily_loss_blocked=self._meta('loss-blocked:'+day) is not None if day else False,
             legacy_completed_count=sum(1 for d,r in attempts.items() if d not in reserved and r['state']=='done'),
-            notice='Planned admission headroom, not broker cash, fill inventory or reconciled exposure. Partial fills retain full headroom until terminal quantity evidence; uncertain submissions are never automatically resent. Fees/net P&L and account recovery clearance remain unavailable.')
+            notice='Planned admission headroom, not broker cash, fill inventory or reconciled exposure. Partial fills retain full headroom until terminal quantity evidence; uncertain submissions are never automatically resent. This journal grants no correction clearance or fee/net-profit claim.')
 
     def export(self, after=0, through=None):
         if type(after) is not int or after<0: raise EvidenceError('invalid_evidence_cursor')

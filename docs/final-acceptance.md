@@ -14,7 +14,7 @@ candidate; merge only after its applicable acceptance evidence is complete.
 | Presets/settings | Reference, MWF and custom; select/edit/save/duplicate/reset; draft versus applied; immutable versions; shared engine validation | Keep existing automated coverage; unsupported paper timing/caps must continue to reject explicitly |
 | Dashboard | Source candles, decisions, trades, account and risk views; separate simulation/paper modes; local bundles and exports | Existing full-stack fixture suites verify behaviour; actual Mac/provider checks remain separate |
 | Execution/risk | SPY paper only; saved intent/reservation before dispatch; bounded quotes/limits/brackets; durable entry/loss gates | Actual account entitlement and supervised signal/order/fill/protection/exit lifecycle |
-| Recovery | No blind retry; agreeing inventory reads; retained unknown outcomes; terminal accounting/retirement without clearing holds | Account-wide correction clearance is unfinished; actual provider restart/disconnect acceptance is absent |
+| Recovery | No blind retry; agreeing inventory reads; retained unknown outcomes; terminal accounting/retirement and explicit account-wide review of supported terminal corrections | Unsupported identity/quantity/fee/cash/history corrections stay blocked; actual provider restart/disconnect acceptance is absent |
 | Fees/net profit | Per-side simulated costs; conditional paper estimates; separate fee and cash evidence | Complete attributable broker fees and cash reconciliation are unfinished; missing costs must remain unknown |
 
 The final three outstanding categories are real release limitations, not optional
@@ -41,7 +41,7 @@ python scripts/release_check.py \
 
 The output directory must be new and outside the checkout. The command runs the
 full Python suite, dependency check, locked frontend install, TypeScript/build,
-compilation, CLI help, whitespace and all ten existing browser variants. It
+compilation, CLI help, whitespace and all eleven browser variants. It
 uses injected broker/market data, removes Alpaca credential variables from child
 environments and never starts the ordinary paper worker. It does not download a
 browser. It retains each command's real exit code, elapsed time, log and SHA-256.
@@ -95,3 +95,8 @@ Do not delete journals or force a retry to clear a blocked state.
 User input is needed only for the account/data-dependent steps: secure local
 credentials, the chosen paper capital/risk/feed, and local permitted archives.
 Never request keys in chat or require uploads just to keep local UI work moving.
+
+The supported terminal-correction permission policy is now implemented on this
+candidate; see [conditions, re-blocking and limits](terminal-correction-clearance.md).
+It preserves daily-loss/session controls and requires explicit Start afterwards.
+It does not close the attributable-fee or actual provider acceptance requirements.

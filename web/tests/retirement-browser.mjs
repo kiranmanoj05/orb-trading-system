@@ -8,6 +8,7 @@ import { chromium } from "playwright";
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const managed = process.argv.includes("--management");
 const failStatus = process.argv.includes("--status-failure");
+const recovery = process.argv.includes("--recovery");
 const temp = await mkdtemp(tmpdir() + "/orb-retirement-"),
   base = "http://127.0.0.1:8892";
 const server = spawn(
@@ -247,6 +248,83 @@ try {
   console.log(
     "PASS evidence download retains linked review decision and terminal risk release",
   );
+  if (recovery) {
+    await page
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+      .getByText("Terminal correction clearance", { exact: true })
+      .click();
+    const panel = page
+      .locator("details")
+      .filter({
+        has: page.locator("summary", {
+          hasText: /^Terminal correction clearance$/,
+        }),
+      });
+    const prepared = page.waitForResponse((r) =>
+      r.url().endsWith("/recovery/prepare"),
+    );
+    await panel
+      .getByRole("button", { name: "Prepare terminal clearance", exact: true })
+      .click();
+    const candidate = (await (await prepared).json()).recovery.case;
+    assert.equal(candidate.assessment.eligible, true);
+    const accept = panel.getByRole("button", {
+      name: "Accept terminal clearance",
+      exact: true,
+    });
+    assert.equal(await accept.isDisabled(), true);
+    console.log(
+      "PASS real account-wide recovery requires a fresh case and separate acknowledgement",
+    );
+    const acknowledgement = panel.getByRole("checkbox");
+    await acknowledgement.check();
+    await page.route(
+      "**/api/paper/recovery/accept",
+      (route) => {
+        const value = route.request().postDataJSON();
+        return route.continue({
+          postData: JSON.stringify({ ...value, fingerprint: "0".repeat(64) }),
+        });
+      },
+      { times: 1 },
+    );
+    const refused = page.waitForResponse(
+      (r) => r.url().endsWith("/recovery/accept") && r.status() === 409,
+    );
+    await accept.click();
+    await refused;
+    await panel.getByRole("alert").waitFor();
+    assert.equal(await acknowledgement.isChecked(), false);
+    assert(
+      (await (await fetch(base + "/api/paper/status")).json()).evidence
+        .entries_blocked,
+    );
+    console.log(
+      "PASS refused recovery leaves holds intact and resets explicit acknowledgement",
+    );
+    await acknowledgement.check();
+    const accepted = page.waitForResponse(
+      (r) => r.url().endsWith("/recovery/accept") && r.status() === 200,
+    );
+    await accept.click();
+    const value = await (await accepted).json();
+    assert.equal(value.evidence.entries_blocked, false);
+    assert.equal(value.enabled, false);
+    assert.equal(value.restart.worker_check_required, true);
+    assert.equal(value.admission.session_attempt_count, 1);
+    await panel.getByText(/Acceptance saved/).waitFor();
+    const reviewHistory = await (
+      await fetch(base + "/api/paper/reviews")
+    ).json();
+    assert(reviewHistory.events.some((v) => v.kind === "recovery_clearance"));
+    assert(reviewHistory.events.some((v) => v.kind === "recovery_decision"));
+    console.log(
+      "PASS actual clearance transaction preserves consumed entry and stopped worker with restart required",
+    );
+  }
   for (const width of [390, 768, 1500]) {
     await page.setViewportSize({ width, height: 1050 });
     assert(
@@ -259,7 +337,11 @@ try {
   assert(
     actions.every(
       (url) =>
-        url.endsWith("/reviews/record") || url.endsWith("/reviews/prepare"),
+        url.endsWith("/reviews/record") ||
+        url.endsWith("/reviews/prepare") ||
+        (recovery &&
+          (url.endsWith("/recovery/prepare") ||
+            url.endsWith("/recovery/accept"))),
     ),
   );
   assert.equal(

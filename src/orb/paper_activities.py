@@ -154,6 +154,14 @@ class PaperActivities:
     def report(self, day, orders, outcome, held):
         records = list(self.db.execute('SELECT * FROM paper_fill_activities WHERE day=? ORDER BY seq', (day,)))
         events = [dict(verified(r), first_observed_at=r['observed_at'], seq=r['seq']) for r in records]
+        version_event_count = len(events)
+        from orb.paper_recovery import selected_activities
+        selection = selected_activities(self.db, day) if not held else None
+        if selection:
+            selected = {(v['activity_id'], v['fingerprint']) for v in selection['members']}
+            chosen = [r for r in records if (r['activity_id'], r['fingerprint']) in selected]
+            if len(chosen) != len(selected): raise EvidenceError('recovery_activity_membership_failed')
+            events = [dict(verified(r), first_observed_at=r['observed_at'], seq=r['seq']) for r in chosen]
         row = self.db.execute('SELECT * FROM paper_activity_scans WHERE day=? ORDER BY seq DESC LIMIT 1', (day,)).fetchone()
         scan = dict(verified(row), observed_at=row['observed_at']) if row else None
         state, gross = 'not_observed', None
@@ -183,6 +191,8 @@ class PaperActivities:
                     gross = canonical(sum(((-1 if e['side'] == 'buy' else 1) * Decimal(e['quantity']) * Decimal(e['price']) for e in events), Decimal(0)))
                 else: state = 'open_or_incomplete_orders'
         return dict(state=state, scan=scan, event_count=len(events), events=events[:100], events_truncated=len(events) > 100,
+                    **(dict(version_event_count=version_event_count,selection='reviewed_terminal_versions',
+                            clearance_case_id=selection['case_id']) if selection else {}),
                     orders=compared, gross_price_pnl_usd=gross, fees_usd=None, net_pnl_usd=None,
                     notice='Reported FILL activities matched to durable orders. Quantity agreement is not execution completeness, correction resolution or account reconciliation. Creation-time scan; fees/net unavailable.')
 

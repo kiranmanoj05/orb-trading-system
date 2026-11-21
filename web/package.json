@@ -14,7 +14,8 @@
     "test:performance": "node tests/performance-browser.mjs",
     "test:alignment": "node tests/alignment-browser.mjs",
     "test:retirement": "node tests/retirement-browser.mjs",
-    "test:management-retirement": "node tests/retirement-browser.mjs --management"
+    "test:management-retirement": "node tests/retirement-browser.mjs --management",
+    "test:recovery": "node tests/retirement-browser.mjs --recovery"
   },
   "dependencies": {
     "react": "19.3.1",

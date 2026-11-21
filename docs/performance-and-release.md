@@ -100,8 +100,10 @@ Existing native behaviour is intentionally retained:
 - Corrections remain blocked. Reading performance, a matching cash diagnostic,
   or a review record cannot clear a hold or authorise a retry.
 
-**General correction clearance and complete account/settlement reconciliation
-are still unfinished.** Do not delete the database, reset an anchor, or edit
+The release candidate supports [explicit terminal-correction clearance](terminal-correction-clearance.md)
+only after account-wide eligibility checks and reviewed native retirement.
+**General unsupported correction clearance and complete account/settlement
+reconciliation remain unavailable.** Do not delete the database, reset an anchor, or edit
 SQLite to make Start available. Preserve it, inspect the broker, and retain the
 discrepancy. This release does not claim unattended recovery is complete.
 

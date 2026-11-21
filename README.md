@@ -26,7 +26,10 @@ observations, explicit incomplete outcomes, gross-only closed estimates and
 persistent correction holds.
 Read-only [fill activity history](docs/paper-fill-activities.md) adds individual
 reported fills, explicit quantity mismatches and separate gross estimates;
-fees/net P&L and account-wide correction clearance remain unavailable.
+fees/net P&L remain unavailable. The release candidate adds an explicit
+[supported terminal-correction clearance](docs/terminal-correction-clearance.md)
+with an account-wide eligibility check, preserved history and mandatory fresh
+startup checks. Unsupported account corrections remain blocked.
 Held attempts now support [evidence-bound review records](docs/paper-correction-reviews.md)
 with read-only account preflight and append-only decisions; reviews keep holds
 and automatic actions blocked.

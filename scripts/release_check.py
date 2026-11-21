@@ -29,6 +29,7 @@ BROWSERS = (
     ("retirement", "retirement-browser.mjs", ()),
     ("management", "retirement-browser.mjs", ("--management",)),
     ("status-failure", "retirement-browser.mjs", ("--management", "--status-failure")),
+    ("recovery", "retirement-browser.mjs", ("--recovery",)),
 )
 
 

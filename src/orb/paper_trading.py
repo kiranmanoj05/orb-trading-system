@@ -215,7 +215,9 @@ class PaperEngine:
 
     def status(self):
         with self.lock:
+            from orb.paper_recovery import PaperRecovery
             return dict(enabled=self.enabled, environment='paper', symbol='SPY', feed=self.feed,
+                        recovery=PaperRecovery(self.db).report(self.review_clock().isoformat()),
                         message=self.message, updated_at=self.updated_at, preset=self.record, market=self.market,
                         cash_bridge=PaperCash(self.db).report(),
                         restart=PaperRestart(self.db).report(self.restart_epoch,self.restart_required,self.restart_blocked,self.restart_seq),
@@ -755,3 +757,30 @@ class PaperEngine:
 
     def review_events(self, after=0, through=None, holds=False):
         with self.lock: return PaperReviews(self.db).export(after,through,holds=holds)
+
+    def prepare_recovery(self):
+        from orb.paper_recovery import PaperRecovery, account_basis
+        with self.lock, self.evidence_write_lease():
+            if self.enabled: raise ReviewConflict('Stop new entries before preparing recovery.')
+            expected = account_basis(self.db)
+            scope = self.meta('account')
+            if scope is None: raise ReviewConflict('Saved account scope is required.')
+            client = self.client or PaperClient()
+            started = self.review_clock()
+        preflight = capture_preflight(client, scope)
+        with self.lock, self.evidence_write_lease():
+            PaperRecovery(self.db).prepare(expected, preflight, started.isoformat(), self.review_clock().isoformat())
+            return self.status()
+
+    def accept_recovery(self, case_id, fingerprint):
+        from orb.paper_recovery import PaperRecovery
+        with self.lock, self.evidence_write_lease():
+            if self.enabled: raise ReviewConflict('Stop new entries before accepting recovery.')
+            PaperRecovery(self.db).accept(case_id, fingerprint, self.review_clock().isoformat())
+            self.enabled = False
+            held = bool(self.evidence.holds())
+            self.restart_required, self.restart_blocked, self.restart_seq = True, held, None
+            self.restart_epoch = uuid4().hex
+            self.message = ('Historical clearance retained; current correction holds still block trading.' if held else
+                            'Reviewed terminal corrections cleared. Worker stopped; explicit Start and fresh restart checks required.')
+            return self.status()

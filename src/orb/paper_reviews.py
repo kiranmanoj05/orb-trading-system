@@ -38,6 +38,11 @@ def record_hold(db, day, reason, at, source):
         marks[table] = db.execute(f'SELECT COALESCE(MAX(seq),0) FROM {table} WHERE day=?',(day,)).fetchone()[0]
     safe_reason = reason if isinstance(reason,str) and re.fullmatch('[a-z_]{1,80}',reason) else 'legacy_unknown_hold'
     value = dict(reason=safe_reason,source=source,evidence_marks=marks)
+    clearance = db.execute("SELECT seq FROM paper_review_log WHERE kind='recovery_clearance' ORDER BY seq DESC LIMIT 1").fetchone()
+    if clearance:
+        # A repeated reason after explicit clearance is a new occurrence, even
+        # when source payloads are identical. Never deduplicate it into permission.
+        value['after_recovery_clearance_seq'] = clearance['seq']
     fingerprint = digest(value)
     if db.execute('SELECT 1 FROM paper_hold_events WHERE day=? AND fingerprint=?',(day,fingerprint)).fetchone(): return
     if db.execute('SELECT COUNT(*) FROM paper_hold_events').fetchone()[0] >= MAX_HOLDS:

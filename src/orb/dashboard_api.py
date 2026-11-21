@@ -254,6 +254,22 @@ def create_app(*, port=8765, examples=False, web_dir=None, preset_db=None, resea
         except (ReviewConflict,PaperError) as exc: raise HTTPException(409,str(exc)) from None
         except KeyError: raise HTTPException(404,'Review case not found.') from None
 
+    @app.post('/api/paper/recovery/prepare')
+    @app.post('/api/paper/recovery/accept')
+    async def paper_recovery(request: Request):
+        if not paper_engine: raise HTTPException(409, 'Paper storage is not configured.')
+        p = await read_json(request,1024)
+        try:
+            if request.url.path.endswith('/prepare'):
+                if p != {}: raise HTTPException(422, 'Recovery preparation takes no supplied evidence.')
+                return await run_in_threadpool(paper_engine.prepare_recovery)
+            if (not isinstance(p,dict) or set(p)!={'case_id','fingerprint'}
+                    or any(not isinstance(v,str) or len(v)!=64 for v in p.values())):
+                raise HTTPException(422, 'Select the exact prepared recovery case.')
+            return await run_in_threadpool(paper_engine.accept_recovery,p['case_id'],p['fingerprint'])
+        except (ReviewConflict,PaperError,AcquisitionError) as exc: raise HTTPException(409,str(exc)) from None
+        except KeyError: raise HTTPException(404,'Recovery case not found.') from None
+
     @app.post('/api/paper/evidence/refresh')
     @app.post('/api/paper/activities/refresh')
     @app.post('/api/paper/fees/refresh')

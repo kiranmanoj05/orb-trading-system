@@ -3,6 +3,7 @@ import PaperAdmission from "./PaperAdmission";
 import PaperManagement from "./PaperManagement";
 import PaperRestart from "./PaperRestart";
 import PaperCash from "./PaperCash";
+import PaperRecovery from "./PaperRecovery";
 type Row = Record<string, any>;
 export default function PaperControls({
   status,
@@ -139,6 +140,7 @@ export default function PaperControls({
       <PaperManagement management={status?.management} />
       <PaperRestart restart={status?.restart} changed={changed} />
       <PaperCash cash={status?.cash_bridge} changed={changed} />
+      <PaperRecovery recovery={status?.recovery} changed={changed} />
       <details>
         <summary>Operation & limits</summary>
         <p className="drawer-note">
